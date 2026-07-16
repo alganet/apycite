@@ -48,9 +48,9 @@ pip install apycite       # brings apysource with it
 <comment> cite(<source>[ § <section>][, <key>: <value>]…): "<quote>"
 ```
 
-One line. It is a comment, so it fits everywhere a comment fits — above a branch,
-inside a `const` table, next to a match arm, in `#[cfg]`-gated code. That is the
-whole reason it is a comment and not a macro.
+It is a comment, so it fits everywhere a comment fits — above a branch, inside a
+`const` table, next to a match arm, in `#[cfg]`-gated code. That is the whole
+reason it is a comment and not a macro.
 
 **`<source>`** names an entry in your sources file. It is *not* a URL. apycite has
 no idea what an RFC is, what HTML is, or where rfc-editor lives.
@@ -64,6 +64,47 @@ writes hundreds of them. One sugar; the general form is right there.
 
 **The quote is required.** A citation that quotes nothing makes no claim anybody
 can check.
+
+### The quote may run onto the next lines
+
+Normative sentences are long, and a line limit should not have to win against one:
+
+```rust
+// cite(RFC 9110 § 7.2): "A user agent MUST generate a Host header field in a
+// request unless it sends that information as an ":authority" pseudo-header field."
+if host_count == 0 {
+```
+
+```c
+/* cite(RFC 9112 § 3.2): "A client MUST send a Host header field
+ * (Section 7.2 of [HTTP]) in all HTTP/1.1
+ * request messages." */
+```
+
+No continuation marker, no trailing backslash. **The quote ends on the line that
+ends with a `"`** — which is the rule one line already obeys, where it reads as
+"nothing may follow the closing quote". Lines are joined with a single space, and
+apysource normalises whitespace on both sides of the comparison, so how you wrap a
+quote is not a fact about it.
+
+Two rules follow, and both stop the run rather than guess:
+
+- **A cite may not be swallowed by the quote above it.** If a quote is left open,
+  the line below it is not read forward into it — because that line might be
+  another cite, and it would then be *gone*, from a run that exits 0.
+- **Quotation marks pair up.** RFC 9110 writes `"Host"` and `":authority"`, never
+  half of either, so a closed quote has an even number of `"`. Without that count,
+  breaking a line right after an embedded mark would end the quote early — and the
+  truncated quote is a *prefix of the real sentence*, so it is genuinely in the
+  source and **verifies green** while the rest of it goes unchecked. That is the
+  worst thing this tool could do, so it counts.
+
+  The price: a quote containing a lone `"` — prose about the character itself —
+  cannot be cited. Which mark closes `"the " character"` was never something to
+  guess between; it is now refused instead.
+
+What is *not* supported is elision. The quote is contiguous source text, and a
+trailing `...` is the only way to say "and it goes on" (apysource prefix-matches).
 
 ## It is not a spec tool
 
@@ -151,18 +192,14 @@ for every pull request; `verify` fetches, so it runs nightly:
 - run: apysource check specs.yaml      # (or: apycite verify, nightly)
 ```
 
-## The one thing that is not borrowed from `reuse`
+## Nothing goes unlooked-at
 
-The comment-style system — a class per language, extension and filename maps,
-`SINGLE_LINE` / `MULTI_LINE` — is [reuse](https://github.com/fsfe/reuse-tool)'s
-design, and gratefully so.
+A scanner meets a file whose language it does not know. The obvious thing is to
+skip it — and that is a **silently dropped citation**: a cite in a `.zig` file goes
+unread, the report says nothing, CI stays green, and the tool has verified nothing
+and called it a pass.
 
-One thing is deliberately not. `reuse` returns `None` for an unrecognised
-extension and its callers skip the file. Here that would be a **silently dropped
-citation**: a cite in a `.zig` file goes unread, the report says nothing, CI stays
-green, and the tool has verified nothing and called it a pass.
-
-So apycite rests on a theorem instead:
+So apycite does not skip. It rests on a theorem:
 
 > **Every string that parses as a cite, in every comment style, contains the
 > literal substring `cite(`.**

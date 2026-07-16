@@ -91,10 +91,16 @@ TREE = {
     # MDN, in JavaScript. MdnRepo claims this URL and fetches the *authored
     # markdown* from mdn/content instead of the rendered page — so a moved page
     # 404s loudly rather than quietly following a 301 somewhere else.
+    #
+    # Written across three lines, and broken immediately after an embedded
+    # closing quotation mark — the placement that used to truncate a quote into a
+    # prefix of the real sentence, which is still *in* the source and so verified
+    # green while the rest went unchecked. A real document is the only place that
+    # claim can actually be tested.
     "src/mdn.js":
-        '// cite(MDN Origin, section: Origin header): "The HTTP Origin request '
-        'header indicates the origin (scheme, hostname, and port) that caused '
-        'the request."',
+        '// cite(MDN Origin, section: Origin header): "The HTTP Origin request header\n'
+        '// indicates the origin (scheme, hostname, and port)\n'
+        '// that caused the request."',
 
     # Not a specification at all, and that is the point: a tool that only ever
     # cites RFCs is a lint-http script wearing a general-purpose hat.

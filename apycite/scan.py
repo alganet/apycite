@@ -7,12 +7,11 @@
 The one thing to understand about this module is what it does with a file whose
 language it does not know.
 
-`reuse` returns ``None`` for an unrecognised extension, and its callers skip the
-file. For a licence header that is a nuisance. Here it would be a **silent
-dropped citation**: a cite in a `.zig` file goes unread, the report says nothing,
-CI stays green, and the tool has validated nothing and called it a pass. That is
-the precise failure this project exists to prevent, and it would arrive wearing
-the tool's own colours.
+The obvious thing to do — no comment style, so skip it — is a **silently dropped
+citation**: a cite in a `.zig` file goes unread, the report says nothing, CI stays
+green, and the tool has validated nothing and called it a pass. That is the
+precise failure this project exists to prevent, and it would arrive wearing the
+tool's own colours.
 
 So the walk rests on a theorem — every cite contains the literal ``cite(``
 (``grammar.MARKER``, asserted over every style and placement in the tests) — and
@@ -29,11 +28,20 @@ on one rule that follows from it:
 from __future__ import annotations
 
 import fnmatch
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from apycite.comments import CommentStyle, Payload, get_comment_style, lex_line
-from apycite.grammar import MARKER, Cite, CiteError, parse
+from apycite.grammar import (
+    MARKER,
+    Cite,
+    CiteError,
+    is_near_miss,
+    opens_unclosed_quote,
+    parse,
+    quote_is_closed,
+)
 
 
 @dataclass(frozen=True)
@@ -99,27 +107,93 @@ def _decode(path: Path) -> str | None:
     return raw.decode("utf-8")
 
 
+#: One line, as the lexer left it: its number, its raw text, and its payloads.
+Lexed = tuple[int, str, list[Payload]]
+
+
+def _continue_quote(
+    lexed: list[Lexed], start: int, opening: Payload, rel: str,
+) -> tuple[str, int, list[Payload]]:
+    """Read a quote that runs past the end of its line.
+
+    Returns the joined payload text, the index of the last line consumed, and
+    every payload that went into it — which the reconciliation rule needs, or the
+    continuation lines would each look like an unread ``cite(``.
+
+    **The guard that matters is the one on line 4 of the loop.** An unterminated
+    quote reads forward, and what it reads forward over might be another cite:
+
+        // cite(RFC 9110 § 7.2): "a quote somebody forgot to close
+        // cite(RFC 9112 § 3.2): "and the one below it, swallowed whole"
+
+    Without the guard the second line is joined into the first quote, and the
+    second citation is *gone* — not wrong, not reported: gone, from a run that
+    exits 0. It is the same shape as every other bug this scanner has had, and it
+    arrives the moment quotes are allowed to span lines. So a continuation line
+    that is itself cite-shaped stops the run, and says which quote ate which.
+    """
+    text = opening.text.strip()
+    used = [opening]
+
+    for i in range(start + 1, len(lexed)):
+        lineno, _, payloads = lexed[i]
+
+        if len(payloads) != 1:
+            break  # code, a blank line, or something too odd to read forward over
+
+        payload = payloads[0]
+        if MARKER.search(payload.text):
+            raise CiteError(
+                f"the quote opened on line {lexed[start][0]} is never closed, and "
+                f"line {lineno} is itself a cite — it would have been swallowed "
+                f"into that quote and never checked. Close the quote above.",
+            )
+
+        text = f"{text} {payload.text.strip()}"
+        used.append(payload)
+
+        if quote_is_closed(text):
+            return text, i, used
+
+    # Nothing closed it. Two different mistakes end up here, and they want
+    # different words: a quote nobody terminated, and a quote whose quotation
+    # marks do not pair up. Only the second needs explaining.
+    marks = text.count('"')
+    if marks >= 3 and marks % 2:
+        raise CiteError(
+            "the quote's quotation marks do not pair up, so it never closes. "
+            "Marks inside a quoted sentence come in pairs; a lone one cannot be "
+            "told from the mark that ends the quote, and this grammar has no "
+            "escapes. Cite a sentence without it, or write the fragment into "
+            "your sources file by hand.",
+        )
+
+    # Hand the *opening* line back to the grammar, which knows exactly what is
+    # wrong with it — an unterminated quote, or text after the closing one — and
+    # says so far better than this function could.
+    raise _reraise(opening.text)
+
+
+def _reraise(payload: str) -> CiteError:
+    """The grammar's own diagnosis of a line that would not close."""
+    try:
+        parse(payload)
+    except CiteError as exc:
+        return exc
+    return CiteError("the quote is never closed")
+
+
 def _payload_cites(
     rel: str, lineno: int, raw: str, payloads: list[Payload],
-    report: Report, marker_outside: str,
+    report: Report, marker_outside: str, accounted: list[Payload],
 ) -> None:
-    """Parse one line's payloads, and account for every ``cite(`` on it."""
-    #: Payloads that became something: a citation, or an error about one. A
-    #: payload that parsed as an *ordinary comment* is not on this list, and that
-    #: distinction is the whole rule below.
-    accounted: list[Payload] = []
+    """Account for every ``cite(`` on one line.
 
-    for payload in payloads:
-        try:
-            cite = parse(payload.text)
-        except CiteError as exc:
-            report.errors.append(f"{rel}:{lineno}: {exc}")
-            accounted.append(payload)
-            continue
-        if cite is not None:
-            report.cites.append(Found(cite, Site(rel, lineno)))
-            accounted.append(payload)
-
+    ``accounted`` is the payloads that *became* something — a citation, or an
+    error about one. A payload that parsed as an ordinary comment is not on it,
+    and that distinction is the whole rule below. It is passed in because a quote
+    that spans lines accounts for payloads this call never saw.
+    """
     # ── The reconciliation rule ──
     #
     # Every `cite(` on this line must have *become* something. Not "must be
@@ -200,10 +274,52 @@ def scan_file(
         return
 
     report.parsed.append(path)
+
+    # Lexed in full before anything is parsed, because a quote may run onto the
+    # lines below it and the reader has to be able to look ahead.
+    lexed: list[Lexed] = []
     in_block = False
     for lineno, raw in enumerate(text.splitlines(), 1):
         payloads, in_block = lex_line(raw, match.style, in_block)
-        _payload_cites(rel, lineno, raw, payloads, report, marker_outside)
+        lexed.append((lineno, raw, payloads))
+
+    #: lineno -> the payloads on it that became a citation, or an error about one.
+    #: A quote spanning three lines accounts for payloads on all three.
+    accounted: dict[int, list[Payload]] = defaultdict(list)
+    #: The last line a multi-line quote consumed, so its lines are not re-read as
+    #: comments of their own.
+    consumed_through = -1
+
+    for i, (lineno, _, payloads) in enumerate(lexed):
+        if i <= consumed_through:
+            continue
+
+        for payload in payloads:
+            if not is_near_miss(payload.text):
+                continue
+
+            try:
+                if opens_unclosed_quote(payload.text):
+                    joined, last, used = _continue_quote(lexed, i, payload, rel)
+                    cite = parse(joined)
+                    consumed_through = last
+                    for line_used, p in zip(
+                            [n for n, _, _ in lexed[i:last + 1]], used):
+                        accounted[line_used].append(p)
+                else:
+                    cite = parse(payload.text)
+                    accounted[lineno].append(payload)
+            except CiteError as exc:
+                report.errors.append(f"{rel}:{lineno}: {exc}")
+                accounted[lineno].append(payload)
+                continue
+
+            if cite is not None:
+                report.cites.append(Found(cite, Site(rel, lineno)))
+
+    for lineno, raw, payloads in lexed:
+        _payload_cites(rel, lineno, raw, payloads, report, marker_outside,
+                       accounted[lineno])
 
 
 def _excluded(rel: str, patterns: list[str]) -> bool:

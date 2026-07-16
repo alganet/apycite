@@ -27,8 +27,17 @@ import pytest
 from apycite import comments
 from apycite.comments import NAME_STYLE_MAP, lex_line, placements_for
 from apycite.grammar import KEYS, MARKER, Cite, CiteError, parse, render
+from apycite.scan import Report, scan_file
 
 STYLES = sorted(NAME_STYLE_MAP.values(), key=lambda s: s.SHORTHAND)
+
+#: One extension per style, so a rendered cite can be written to a file the
+#: scanner will resolve back to the very style it was written in.
+EXT = {
+    "c": ".rs", "hash": ".py", "html": ".md", "css": ".css",
+    "lisp": ".el", "haskell": ".hs", "sql": ".sql", "lua": ".lua",
+    "tex": ".tex", "php": ".php",
+}
 
 #: Quotes chosen to break things. Every one of them is a real hazard:
 #: the embedded `"` is in RFC 9110 § 7.2 and already in lint-http's tree; the
@@ -77,30 +86,35 @@ IDS = [f"{s.SHORTHAND}-{p}-{c.source}" for c, s, p in CASES]
 # ── P2: render -> scan identity ─────────────────────────────────────────
 
 @pytest.mark.parametrize(("cite", "style", "placement"), CASES, ids=IDS)
-def test_a_cite_reads_back_as_itself(cite, style, placement):
+def test_a_cite_reads_back_as_itself(cite, style, placement, tmp_path):
     """The round trip, over every style and every placement it supports.
 
-    A new comment style is tested the moment it registers — which is what makes
-    an unbounded language table safe to grow.
+    Driven through the real scanner rather than the lexer alone, because a quote
+    that runs onto the next line is reassembled *there* — and a property that
+    tested only the parts a single line goes through would say nothing about the
+    case this exists for.
+
+    A new comment style is tested the moment it registers, in every placement,
+    wrapped and unwrapped. That is what makes an unbounded language table safe to
+    grow.
     """
-    source = comments.render(style, render(cite), placement)
+    path = tmp_path / f"x{EXT[style.SHORTHAND]}"
+    path.write_text(comments.render(style, render(cite), placement) + "\n",
+                    encoding="utf-8")
 
-    found = []
-    in_block = False
-    for line in source.split("\n"):
-        payloads, in_block = lex_line(line, style, in_block)
-        for payload in payloads:
-            got = parse(payload.text)
-            if got is not None:
-                found.append(got)
+    report = Report()
+    scan_file(path, path.name, report)
 
-    assert found == [cite]
+    assert not report.errors
+    assert [f.cite for f in report.cites] == [cite]
 
 
 @pytest.mark.parametrize("style", STYLES, ids=[s.SHORTHAND for s in STYLES])
 def test_an_ordinary_comment_is_not_a_cite(style):
     """The lexer must not turn prose into a citation."""
     for placement in placements_for(style):
+        if placement.endswith("_wrapped"):
+            continue  # there is no quote in prose to wrap inside
         line = comments.render(style, "just an ordinary comment", placement)
         in_block = False
         for raw in line.split("\n"):

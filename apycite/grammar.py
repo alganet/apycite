@@ -25,6 +25,19 @@ The quote is required. A snippet-less fragment is perfectly valid apysource — 
 selector that merely resolves — and it is deliberately not expressible here. The
 claim worth putting next to a line of code is *"the source says this"*, and a
 citation that quotes nothing makes no claim anybody can check.
+
+**The quote may run onto the following comment lines.** Normative sentences are
+long, and a codebase with a line limit should not have to choose between the two.
+The rule is the one a single line already obeys — *the quote ends on the line that
+ends with a* ``"`` — so this needs no new syntax at all:
+
+    // cite(RFC 9110 § 7.2): "A user agent MUST generate a Host header field in a
+    // request unless it sends that information as an ":authority" pseudo-header field."
+
+The lines are joined with a single space. apysource normalises whitespace on both
+sides of the comparison, so how a quote is wrapped is not a fact about it. What is
+*not* supported is elision: the quote is contiguous source text, and a trailing
+``...`` is the only way to say "and it goes on" (apysource then prefix-matches).
 '''
 
 from __future__ import annotations
@@ -92,6 +105,49 @@ def is_near_miss(payload: str) -> bool:
     Anything that does so and then fails to parse is an error, not a comment.
     """
     return re.match(r"cite\b|cite\s*\(", payload.strip()) is not None
+
+
+def quote_is_closed(text: str) -> bool:
+    '''Has this text's quote actually ended?
+
+    Two conditions, and the second one is not decoration.
+
+    **It ends with a ``"``** — the rule a single line already obeys, where it
+    reads as "nothing may follow the closing quote". Across several lines it reads
+    as "keep going until a line ends with one", which is the same rule and needs no
+    new syntax at all.
+
+    **And it has an even number of them.** Quotation marks inside prose come in
+    pairs — RFC 9110 says ``"Host"`` and ``":authority"``, never one half of
+    either — so a cite whose quote has really closed has an even count: the two
+    delimiters, plus pairs. An odd count means the mark we would have closed on is
+    one of the *inner* ones, still open.
+
+    Without the parity test, this is a **false pass**, which is the worst thing
+    this tool can produce:
+
+        // cite(RFC 1): "he said "hello"
+        // and then left."
+
+    The first line ends with a ``"``, so the quote closes early as
+    ``he said "hello`` — and that string *is* in the source, being a prefix of the
+    real sentence. So it verifies **green**, the second line is silently dropped,
+    and the half of the sentence the author actually cared about is never checked
+    by anything. Counting the marks catches it: three is odd, the quote is still
+    open, and the reader keeps going and gets the sentence whole.
+
+    The cost is that a quote containing a *lone* ``"`` — prose about the character
+    itself — can no longer be cited. It could not honestly be cited before either:
+    which mark closes ``"the " character"`` is not something to guess between. It
+    is now refused instead of guessed, and the sources file is the escape hatch.
+    '''
+    return text.endswith('"') and text.count('"') % 2 == 0
+
+
+def opens_unclosed_quote(payload: str) -> bool:
+    """A cite whose quote begins on this line and does not end on it."""
+    text = payload.strip()
+    return text.startswith("cite(") and '"' in text and not quote_is_closed(text)
 
 
 def parse(payload: str) -> Cite | None:

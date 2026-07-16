@@ -4,10 +4,10 @@
 
 """Comment styles, and turning a line of source into the text inside its comment.
 
-The design is `reuse`'s (fsfe/reuse-tool, ``src/reuse/comment.py``): a class per
-comment style, class variables for the markers, and two maps from filename and
-extension. One thing is deliberately *not* reuse's, and it is the reason this
-module exists rather than importing theirs — see ``get_comment_style``.
+A class per comment style, class variables for the markers, and two maps — one
+from filename, one from extension — resolved most-specific first. Adding a
+language is a class and a map entry, and the property tests pick it up the moment
+it registers.
 
 The lexer here is the first of the two phases the grammar depends on. It strips
 comment syntax **and nothing else**, so that ``grammar.py`` never sees a ``*/``.
@@ -56,12 +56,11 @@ class CommentStyle:
     MULTI_LINE: MultiLineSegments = MultiLineSegments("", "", "")
 
     def __init_subclass__(cls, **kwargs: object) -> None:
-        """Register on definition, so a style in a config file's dotted path works.
+        """Register on definition, so a style named by dotted path in config works.
 
-        reuse scans its own module globals for classes named ``*CommentStyle``.
-        Registering here instead means a third-party style — one someone points
-        ``[styles]`` at — is in the map the moment it is imported, with no
-        import-order question to get wrong.
+        A third-party style — one someone points ``[styles]`` at — is in the map
+        the moment it is imported, with no import-order question to get wrong and
+        no module to scan.
         """
         super().__init_subclass__(**kwargs)  # type: ignore[arg-type]
         name = cls.SHORTHAND or cls.__name__.removesuffix("CommentStyle").lower()
@@ -87,13 +86,8 @@ class CCommentStyle(CommentStyle):
     MULTI_LINE = MultiLineSegments("/*", "*", "*/")
 
 
-class PythonCommentStyle(CommentStyle):
-    SHORTHAND = "python"
-    SINGLE_LINE = "#"
-
-
 class HashCommentStyle(CommentStyle):
-    """The same marker, a different name — shell, YAML, TOML, Makefiles."""
+    """Python, shell, Ruby, YAML, TOML, Makefiles — everything that comments with ``#``."""
 
     SHORTHAND = "hash"
     SINGLE_LINE = "#"
@@ -190,6 +184,13 @@ FILENAME_STYLE_MAP: dict[str, type[CommentStyle]] = {
     )
 }
 
+# Names a config file may reasonably reach for. There was a `PythonCommentStyle`
+# here, identical to `HashCommentStyle` in every respect and reachable by no
+# extension at all — two classes that could never disagree, one of which nothing
+# used. An alias says the same thing and cannot drift from itself.
+NAME_STYLE_MAP["python"] = HashCommentStyle
+NAME_STYLE_MAP["shell"] = HashCommentStyle
+
 
 @dataclass(frozen=True)
 class StyleMatch:
@@ -214,11 +215,10 @@ def get_comment_style(
     for a release. Then exact filename, then the combined suffixes (``.blade.php``,
     ``.d.ts``), then the final suffix.
 
-    A miss returns ``None`` — and here is the one place this parts company with
-    reuse, which returns ``None`` so the caller may **skip the file**. Skipping
-    is exactly how a cite in an unrecognised language is dropped in silence while
-    the run stays green. ``None`` here means *unknown*, and unknown is loud: see
-    ``scan.py``, which will not call a tree clean that it could not read.
+    A miss returns ``None``, and ``None`` means **unknown** — never *skip*.
+    Skipping is how a cite in an unrecognised language is dropped in silence while
+    the run stays green, so unknown is loud: see ``scan.py``, which will not call a
+    tree clean that it could not read.
     """
     overrides = overrides or {}
     name = path.name.lower()
@@ -324,6 +324,33 @@ def _strip_middle(text: str, col: int, middle: str) -> Payload:
 
 # ── Rendering, for the property tests ───────────────────────────────────
 
+def wrap_point(body: str) -> int:
+    """Where to break a rendered cite body across lines. ``-1`` if nowhere.
+
+    **Deliberately adversarial**: it breaks immediately after an embedded closing
+    quotation mark whenever the sentence has one. That is the placement that used
+    to end the quote early — ``…sends an ":authority"`` / ``pseudo-header field."``
+    — and produce a truncated quote that *still verified green*, being a prefix of
+    the real sentence.
+
+    Choosing the safe break here would have made the round-trip property agree with
+    a bug rather than catch it. ``grammar.quote_is_closed`` counts the marks, and
+    this is what proves it: every style, every quote with an embedded pair, broken
+    at the worst possible place.
+    """
+    opening = body.find('"')
+    if opening == -1:
+        return -1
+
+    hostile = body.find('" ', opening + 1)
+    if hostile != -1:
+        return hostile + 1
+
+    middle = (opening + len(body)) // 2
+    cut = body.find(" ", middle)
+    return cut if cut > opening else body.find(" ", opening + 1)
+
+
 def render(style: type[CommentStyle], body: str, placement: str = "single") -> str:
     """Write ``body`` as a comment, the way the *language* would.
 
@@ -350,17 +377,37 @@ def render(style: type[CommentStyle], body: str, placement: str = "single") -> s
         cont = f"{middle} " if middle else ""
         return f"{start}\n {cont}{body}\n {end}"
 
+    # The quote broken across two comment lines. Long normative sentences are the
+    # reason this exists, and they are exactly the ones a round-trip test must
+    # cover — a quote that survives being written on one line proves nothing about
+    # a quote that was written on two.
+    cut = wrap_point(body)
+    if cut == -1:
+        raise ValueError("this body cannot be wrapped")
+    head, tail = body[:cut], body[cut + 1:]
+
+    if placement == "single_wrapped":
+        if not style.can_single():
+            raise ValueError(f"{style.SHORTHAND} has no single-line comment")
+        return f"{style.SINGLE_LINE} {head}\n{style.SINGLE_LINE} {tail}"
+
+    if placement == "block_wrapped":
+        if not style.can_block():
+            raise ValueError(f"{style.SHORTHAND} has no block comment")
+        cont = f"{middle} " if middle else ""
+        return f"{start} {head}\n {cont}{tail} {end}"
+
     raise ValueError(f"unknown placement {placement!r}")
 
 
-PLACEMENTS = ("single", "block", "block_middle")
+PLACEMENTS = ("single", "block", "block_middle", "single_wrapped", "block_wrapped")
 
 
 def placements_for(style: type[CommentStyle]) -> tuple[str, ...]:
-    """The ways this style can carry a one-line cite."""
-    out = []
+    """The ways this style can carry a cite."""
+    out: list[str] = []
     if style.can_single():
-        out.append("single")
+        out.extend(("single", "single_wrapped"))
     if style.can_block():
-        out.extend(("block", "block_middle"))
+        out.extend(("block", "block_middle", "block_wrapped"))
     return tuple(out)
