@@ -51,7 +51,7 @@ _APYCITE_KEYS = {"roots", "exclude", "sources", "output",
                  "marker_outside_comments"}
 _SPEC_KEYS = {"match", "source"}
 _LABEL_KEYS = {"match", "label"}
-_RATCHET_KEYS = {"scope", "baseline"}
+_RATCHET_KEYS = {"scope", "baseline", "exclude"}
 
 
 class ConfigError(Exception):
@@ -106,6 +106,10 @@ class Config:
     labels: list[LabelRule] = field(default_factory=list)
     ratchet_scope: str | None = None
     ratchet_baseline: str | None = None
+    #: Files inside the scope that carry no normative content, and so can never be
+    #: cited: a `mod.rs`, an `__init__.py`, an `index.ts`. Without this they would
+    #: sit in the baseline forever and it could never empty.
+    ratchet_exclude: list[str] = field(default_factory=list)
 
 
 def _load_style(value: str, key: str) -> type[CommentStyle]:
@@ -210,6 +214,7 @@ def load(path: Path | None, root: Path) -> Config:
     _reject_unknown(ratchet, _RATCHET_KEYS, "[ratchet]")
     config.ratchet_scope = ratchet.get("scope")
     config.ratchet_baseline = ratchet.get("baseline")
+    config.ratchet_exclude = list(ratchet.get("exclude", []))
 
     return config
 

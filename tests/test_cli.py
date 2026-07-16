@@ -142,6 +142,37 @@ def test_init_lists_only_the_uncited(project):
     assert main(["ratchet"]) == 0
 
 
+def test_exclude_keeps_a_non_rule_out_of_the_baseline(project):
+    """A rules directory usually contains a file that is not a rule.
+
+    `mod.rs` enforces nothing, so it can never earn a citation. Without `exclude`
+    it sits in the baseline forever, the baseline can never empty, and the end of
+    a migration — where the ratchet becomes a plain "every file is cited" rule —
+    is simply unreachable. Excluding it is a claim, written where it is reviewed.
+    """
+    (project / "apycite.toml").write_text(
+        CONFIG + 'exclude = ["src/rules/mod.rs"]\n', encoding="utf-8")
+    _rule(project, "a", CITE)
+    _rule(project, "mod")
+
+    assert main(["ratchet", "--init"]) == 0
+    listed = [line for line in (project / "baseline.txt").read_text().splitlines()
+              if not line.startswith("#")]
+    assert listed == [], "mod.rs is not a rule and must not be waiting to become one"
+    assert main(["ratchet"]) == 0
+
+
+def test_without_exclude_a_non_rule_is_still_held_to_the_scope(project):
+    """The exclusion is opt-in: silence means the file is in scope, as before."""
+    _rule(project, "a", CITE)
+    _rule(project, "mod")
+
+    assert main(["ratchet", "--init"]) == 0
+    listed = [line for line in (project / "baseline.txt").read_text().splitlines()
+              if not line.startswith("#")]
+    assert listed == ["src/rules/mod.rs"]
+
+
 def test_init_refuses_to_overwrite(project):
     _rule(project, "a", CITE)
     assert main(["ratchet", "--init"]) == 0

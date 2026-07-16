@@ -152,7 +152,7 @@ def ratchet(config: Config, *, write: bool = False, init: bool = False) -> int:
 
     scanned = baseline.in_scope(
         [str(p.relative_to(config.root)) for p in report.parsed],
-        config.ratchet_scope)
+        config.ratchet_scope, config.ratchet_exclude)
     cited = {found.site.file for found in report.cites}
     uncited = [f for f in scanned if f not in cited]
 

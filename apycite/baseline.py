@@ -59,8 +59,23 @@ def write(path: Path, files: list[str]) -> None:
     path.write_text(body + "\n", encoding="utf-8")
 
 
-def in_scope(files: list[str], scope: str) -> list[str]:
-    return sorted(f for f in files if fnmatch.fnmatch(f, scope))
+def in_scope(
+    files: list[str], scope: str, exclude: list[str] | None = None,
+) -> list[str]:
+    """The files the ratchet is answerable for.
+
+    ``exclude`` exists because a directory of rules usually also contains a file
+    that is not one: ``mod.rs``, ``__init__.py``, ``index.ts``. It enforces
+    nothing, so it can never earn a citation, and without a way to say so it sits
+    in the baseline forever — which makes the baseline permanently non-empty and
+    the end of a migration unreachable. Excluding a file is a claim that it has no
+    normative content, and it is written in the config where a reviewer sees it.
+    """
+    return sorted(
+        f for f in files
+        if fnmatch.fnmatch(f, scope)
+        and not any(fnmatch.fnmatch(f, pattern) for pattern in exclude or [])
+    )
 
 
 def compare(uncited: list[str], baseline: list[str], scanned: list[str]) -> Ratchet:
