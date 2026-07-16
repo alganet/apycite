@@ -14,11 +14,16 @@ said. The rule that came out of it is written down, and this file is it:
 > what the tests mock, because that is where the bug is.**
 
 And a second rule, particular to this package: **a suite that only ever runs RFCs
-has never seen apycite work as a general tool.** So the tree below cites four
-classes of source, in four languages, through three different apysource paths:
-the generic fetcher on plain text (an RFC), the generic fetcher on HTML (a living
-standard, and a treaty that is not a specification at all), and a repo that claims
-its URL and fetches something else entirely (MDN, via `mdn/content`).
+has never seen apycite work as a general tool.** So the tree below cites five
+sources, in four languages, across every path apysource has: the generic fetcher
+on plain text (an RFC), the generic fetcher on HTML (a living standard, and a
+treaty that is not a specification at all), and two repos that claim their URLs
+and fetch something else entirely (MDN's authored markdown; a novel from Project
+Gutenberg).
+
+Writing this file has now found bugs twice — three misquotations the first time,
+and E10 the second, where apysource insisted that Moby-Dick does not contain
+"Call me Ishmael." It does. That is what this file is for.
 """
 
 import shutil
@@ -45,6 +50,11 @@ sources:
   - label: UN Charter
     url: https://www.un.org/en/about-us/un-charter/full-text
     type: text/html
+
+  - label: Moby-Dick
+    url: https://www.gutenberg.org/ebooks/2701
+    publisher: Harper & Brothers
+    date: "1851"
 """
 
 CONFIG = """
@@ -58,14 +68,14 @@ match = "**/*"
 label = "{path}"
 """
 
-# Four languages, four classes of source, one grammar.
+# Four languages, five sources, one grammar.
 #
-# Three of these four quotes were wrong the first time this file was written, and
-# every one of them was caught by running it. The section on the Fetch spec was
+# Most of these quotes were wrong the first time this file was written, and every
+# one of them was caught by running it. The section on the Fetch spec was
 # invented; the MDN sentence was misremembered (the source says "The **HTTP**
-# Origin request header"); and "Call me Ishmael." was refused as too short to be
-# evidence. That is the tool doing its job on its own author, and it is worth
-# leaving the scar tissue in the comments.
+# Origin request header"); and "Call me Ishmael." on its own was refused as too
+# short to be evidence — sixteen characters, which is a phrase, not a citation.
+# That is the tool doing its job on its own author, and the scar tissue stays.
 TREE = {
     # Plain text, RFC section tree. The generic fetcher.
     "src/host.rs":
@@ -92,6 +102,14 @@ TREE = {
         '-- cite(UN Charter, section: Article 51): "Nothing in the present '
         'Charter shall impair the inherent right of individual or collective '
         'self-defence"',
+
+    # A novel, through GutenbergRepo, with no targetter at all — the quote is
+    # matched against the whole book. Writing this is what found E10: apysource
+    # said Moby-Dick does not contain "Call me Ishmael.", having fetched all 143
+    # chapters and read 247 characters of the title page.
+    "src/whale.lua":
+        '-- cite(Moby-Dick): "Call me Ishmael. Some years ago—never mind how '
+        'long precisely—having little or no money in my purse"',
 }
 
 
@@ -112,12 +130,12 @@ def _run(args, cwd):
                           cwd=cwd, capture_output=True, text=True, timeout=300)
 
 
-def test_extract_reads_four_languages_and_four_source_classes(project):
+def test_extract_reads_five_sources_across_four_languages(project):
     result = _run(["extract"], project)
     assert result.returncode == 0, result.stderr
 
     doc = (project / "specs.yaml").read_text()
-    for label in ("RFC 9112", "Fetch", "MDN Origin", "UN Charter"):
+    for label in ("RFC 9112", "Fetch", "MDN Origin", "UN Charter", "Moby-Dick"):
         assert label in doc, f"{label} did not survive extraction"
 
 
@@ -157,13 +175,16 @@ def test_a_drifted_quote_fails_and_names_the_line(project, tmp_path):
         "the failure did not name the code that relies on the quote"
 
 
-def test_a_repo_backed_source_is_really_going_through_the_repo(project):
-    """MdnRepo fetches `mdn/content` markdown, not the rendered page.
+def test_the_repo_backed_sources_really_go_through_their_repos(project):
+    """Two repos claim their URLs here, and `--strict-repos` fails if one could
+    not serve what it claimed.
 
-    The point is structural: a moved MDN page 404s in the repo instead of quietly
-    following a 301 to a page that says something else. If this ever starts
-    passing through the generic fetcher, the citation is being checked against a
-    different document than the one it names, and nothing would say so.
+    MdnRepo fetches `mdn/content` markdown rather than the rendered page, so a
+    moved page 404s instead of quietly following a 301 to a page that says
+    something else. GutenbergRepo assembles a book out of its chapters — and
+    Moby-Dick is cited here with no targetter at all, which is the case that was
+    broken (E10): the quote is matched against the whole book, which is what a
+    fragment with no targetter means everywhere else in apysource.
     """
     _run(["extract"], project)
     result = _run(["verify", "--strict-repos"], project)
