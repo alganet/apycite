@@ -1,0 +1,75 @@
+# SPDX-FileCopyrightText: 2026 Alexandre Gomes Gaigalas <alganet@gmail.com>
+#
+# SPDX-License-Identifier: ISC
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "apycite"
+dynamic = ["version"]
+description = "Keep the quote next to the code it justifies, and prove it is still in the source"
+readme = "README.md"
+license = "ISC"
+authors = [{name = "Alexandre Gomes Gaigalas", email = "alganet@gmail.com"}]
+keywords = ["citation", "quotes", "source", "verification", "comments", "lint"]
+requires-python = ">=3.12"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Text Processing :: Markup",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+# apysource is a hard dependency, not an optional one, and the reason is the
+# round-trip guard: every run loads its own output back through apysource's real
+# loader. A guard that silently does not run when the dependency is missing is
+# precisely the thing this tool exists to prevent.
+dependencies = [
+    "apysource>=0.3.1",
+    "pyyaml>=6.0",
+]
+
+[project.urls]
+Repository = "https://github.com/alganet/apycite"
+Issues = "https://github.com/alganet/apycite/issues"
+
+[project.scripts]
+apycite = "apycite.cli.__main__:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0",
+    "slipcover>=1.0",
+    "mypy>=1.0",
+    "ruff>=0.6",
+]
+
+[tool.setuptools.dynamic]
+version = {attr = "apycite.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["apycite*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "live: hits the network and reads a real document (deselect with -m 'not live')",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F"]
+
+[tool.mypy]
+warn_return_any = true
+check_untyped_defs = true
+ignore_missing_imports = true
+disable_error_code = ["import-untyped"]
