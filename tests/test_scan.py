@@ -165,7 +165,51 @@ def test_a_string_literal_that_opens_a_block_does_not_swallow_a_cite(tmp_path):
     # reconciliation rule started asking whether a marker was *accounted for*
     # rather than merely whether it sat inside some payload. It sat inside one:
     # the whole line, `//` and all, read as the body of a phantom block comment.
+    #
+    # It now takes the first branch: the lexer reads string literals, so the
+    # phantom block never opens. Reconciliation stays as the net under it.
     assert report.cites or report.errors, "the cite vanished without a word"
+    assert report.cites, "the block never opened, so the cite is simply read"
+    assert not report.errors
+
+
+def test_a_media_range_in_a_string_does_not_open_a_block(tmp_path):
+    """The bug that made the lexer read strings, found by citing an HTTP linter.
+
+    A media range is written `*/*`, so `"image/*"` — an ordinary string in ordinary
+    code — carries the three characters that open a block comment. Every citation
+    below it in the file was reported unreadable. The complaint was correct and the
+    reading was not: there is no comment there, only a string that looks like one.
+    """
+    report = _scan(tmp_path, {"a.rs": '\n'.join([
+        'let allowed = ["text/plain", "image/*", "*/*"];',
+        'fn check() {',
+        f'    {CITE}',
+        '    if host_count == 0 {}',
+        '}',
+    ])})
+
+    assert report.cites, f"a string ate the citation: {report.errors}"
+    assert not report.errors
+
+
+def test_a_string_delimiter_inside_a_comment_is_not_a_string(tmp_path):
+    """Scanning is left to right: past a `//`, the rest of the line is payload.
+
+    A lone quote in prose (`// the "Host" header`) must not swallow the marker
+    that follows it, and an unbalanced one must not swallow the next line either —
+    the state does not survive the line it was opened on.
+    """
+    report = _scan(tmp_path, {"a.rs": '\n'.join([
+        'fn check() {',
+        '    // the "Host" header — see below. A lone " is fine.',
+        f'    {CITE}',
+        '    if host_count == 0 {}',
+        '}',
+    ])})
+
+    assert report.cites, f"prose ate the citation: {report.errors}"
+    assert not report.errors
 
 
 def test_a_cite_in_a_string_literal_is_reported(tmp_path):

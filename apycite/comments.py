@@ -54,6 +54,12 @@ class CommentStyle:
     #: leave ``/ cite(…)`` — which parses as nothing, and drops the citation.
     SINGLE_LINE_REGEXP: re.Pattern[str] | None = None
     MULTI_LINE: MultiLineSegments = MultiLineSegments("", "", "")
+    #: Delimiters of a string literal, inside which a comment marker is *text*.
+    #: Only the double quote, deliberately: it means "string" in every language
+    #: this tool knows, whereas the apostrophe does not — it is a lifetime in
+    #: Rust (``&'static str``) and a plain word in prose, and treating those as
+    #: strings would desynchronise the scan far more often than it would save it.
+    STRING_DELIMITERS: tuple[str, ...] = ('"',)
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         """Register on definition, so a style named by dotted path in config works.
@@ -258,15 +264,70 @@ class Payload:
         return self.col <= pos < self.col + len(self.text)
 
 
-def _find_single(line: str, start: int, style: type[CommentStyle]) -> tuple[int, int]:
+def _string_spans(line: str, delimiters: tuple[str, ...]) -> list[tuple[int, int]]:
+    """The half-open ranges of ``line`` that are inside a string literal.
+
+    A comment marker in one of these is not a marker. HTTP is what taught this:
+    a media range is written ``*/*``, so ``"image/*"`` in ordinary Rust source
+    contains the three characters that open a block comment, and a lexer reading
+    them as one swallows every citation in the rest of the file.
+
+    An unterminated quote runs to the end of the line rather than being ignored.
+    That is the conservative direction: a stray marker inside the run goes unread
+    and the *reconciliation* rule in ``scan`` reports it, which is a complaint. The
+    other way round invents a comment out of code, which is a silent misreading.
+    """
+    spans: list[tuple[int, int]] = []
+    i, n = 0, len(line)
+    while i < n:
+        if line[i] not in delimiters:
+            i += 1
+            continue
+        quote, j = line[i], i + 1
+        while j < n:
+            if line[j] == "\\":
+                j += 2
+                continue
+            if line[j] == quote:
+                break
+            j += 1
+        spans.append((i, min(j + 1, n)))
+        i = j + 1
+    return spans
+
+
+def _outside(pos: int, spans: list[tuple[int, int]]) -> bool:
+    """Whether ``pos`` is code rather than the inside of a string literal."""
+    return not any(lo <= pos < hi for lo, hi in spans)
+
+
+def _find_single(
+    line: str, start: int, style: type[CommentStyle], spans: list[tuple[int, int]],
+) -> tuple[int, int]:
     """Where the next single-line marker is, and how long it is. ``(-1, 0)`` if none."""
     if style.SINGLE_LINE_REGEXP is not None:
-        match = style.SINGLE_LINE_REGEXP.search(line, start)
-        return (match.start(), len(match.group())) if match else (-1, 0)
+        for match in style.SINGLE_LINE_REGEXP.finditer(line, start):
+            if _outside(match.start(), spans):
+                return match.start(), len(match.group())
+        return -1, 0
     if style.SINGLE_LINE:
         pos = line.find(style.SINGLE_LINE, start)
+        while pos != -1 and not _outside(pos, spans):
+            pos = line.find(style.SINGLE_LINE, pos + 1)
         return (pos, len(style.SINGLE_LINE)) if pos != -1 else (-1, 0)
-    return (-1, 0)
+    return -1, 0
+
+
+def _find_block(
+    line: str, start: int, opener: str, spans: list[tuple[int, int]],
+) -> int:
+    """Where the next block-comment opener is, skipping string literals."""
+    if not opener:
+        return -1
+    pos = line.find(opener, start)
+    while pos != -1 and not _outside(pos, spans):
+        pos = line.find(opener, pos + 1)
+    return pos
 
 
 def lex_line(
@@ -278,10 +339,15 @@ def lex_line(
     the compiler terminates it. Taking the last one would let a quote containing
     ``*/`` parse as though the language agreed — and it does not, so the file
     would mean one thing and we would have read another.
+
+    A marker inside a string literal is not a marker. Only *outside* a block: once
+    a block is open, the language is no longer reading strings either, so neither
+    are we.
     """
     start, middle, end = style.MULTI_LINE
     payloads: list[Payload] = []
     i = 0
+    spans = _string_spans(line, style.STRING_DELIMITERS)
 
     while i <= len(line):
         if in_block:
@@ -293,8 +359,8 @@ def lex_line(
             i, in_block = stop + len(end), False
             continue
 
-        single_pos, single_len = _find_single(line, i, style)
-        block_pos = line.find(start, i) if start else -1
+        single_pos, single_len = _find_single(line, i, style, spans)
+        block_pos = _find_block(line, i, start, spans)
 
         if single_pos == -1 and block_pos == -1:
             break
