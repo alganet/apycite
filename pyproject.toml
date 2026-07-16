@@ -28,8 +28,12 @@ classifiers = [
 # round-trip guard: every run loads its own output back through apysource's real
 # loader. A guard that silently does not run when the dependency is missing is
 # precisely the thing this tool exists to prevent.
+#
+# A floor, and a real one: turning a name like `RFC 9110` into a url is apysource's
+# — 0.5.0 is where it landed — and apycite cannot fall back to a copy of it. A copy
+# is what this dependency exists to prevent.
 dependencies = [
-    "apysource>=0.3.1",
+    "apysource>=0.5.0",
     "pyyaml>=6.0",
 ]
 

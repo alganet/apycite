@@ -23,9 +23,10 @@ from apycite.comments import (
     NAME_STYLE_MAP,
     get_comment_style,
 )
+from apysource.sources import load_sources
+
 from apycite.config import Config
 from apycite.scan import Report, scan
-from apycite.sources import load_registry
 
 
 def _scan(config: Config) -> Report:
@@ -42,9 +43,15 @@ def _complain(report: Report) -> int:
 
 
 def _document(config: Config, report: Report) -> str:
-    registry = load_registry(
-        config.root / config.sources if config.sources else None, config.specs)
-    return emit.render(emit.build(report.cites, registry, config.labels))
+    path = config.root / config.sources if config.sources else None
+
+    # The existence check stays on this side of the line. It is *our* config that
+    # named a file that is not there, and a bare FileNotFoundError from apysource
+    # would print as "error: [Errno 2] ...", blaming the tool that was asked.
+    if path is not None and not path.exists():
+        raise emit.EmitError(f"sources file not found: {path}")
+
+    return emit.render(emit.build(report.cites, load_sources(path), config.labels))
 
 
 def extract(config: Config, *, frozen: bool = False,

@@ -21,12 +21,12 @@ from collections import defaultdict
 from typing import Any
 
 import yaml
+from apysource.sources import SourceSet
 from apysource.yaml_input import graph_from_data
 
 from apycite.config import LabelRule
 from apycite.labels import disambiguate, label_for
 from apycite.scan import Found, Site
-from apycite.sources import Registry, SourceError
 
 
 class EmitError(Exception):
@@ -54,21 +54,34 @@ def _dedupe(found: list[Found]) -> list[tuple[Any, list[Site]]]:
 
 
 def build(
-    found: list[Found], registry: Registry, rules: list[LabelRule],
+    found: list[Found], sources: SourceSet, rules: list[LabelRule],
 ) -> dict[str, Any]:
-    """The sources document: the registry's own entries, plus what the cites say."""
+    """The sources document: the file's own entries, plus what the cites say."""
     claims = _dedupe(found)
 
     # Resolve first, so an unknown source name is reported before any labelling
     # work is done and the error is about the thing the author got wrong.
+    #
+    # apysource answers `None` rather than raising, and it is right to: it does
+    # not know why we were asking. We do — a cite, at a file and a line — and a
+    # refusal that does not say where the name was written is one the author has
+    # to go and hunt for.
     resolved = []
+    minted: dict[str, dict[str, Any]] = {}
     for cite, sites in claims:
-        try:
-            source = registry.resolve(cite.source)
-        except SourceError as exc:
+        source = sources.resolve(cite.source)
+        if source is None:
             where = sites[0]
-            raise EmitError(f"{where.file}:{where.line}: {exc}") from None
-        resolved.append((cite, sites, source["label"]))
+            raise EmitError(
+                f"{where.file}:{where.line}: unknown source {cite.source!r}: it "
+                f"is not a label in your sources file, and no pattern mints it. "
+                f"Add it to the sources file — or, if it is a whole family, add "
+                f"a pattern there.",
+            )
+        label = source["label"]
+        if label not in sources.entries:
+            minted[label] = source
+        resolved.append((cite, sites, label))
 
     # ── Labels, unique by construction ──
     #
@@ -102,19 +115,26 @@ def build(
 
     # ── The document ──
     #
-    # Registry entries keep their hand-written fragments. A selector-only
+    # The sources file's entries keep their hand-written fragments. A selector-only
     # fragment, an image, a chapter tree — the things the grammar deliberately
     # cannot say — survive untouched, so its narrowness costs the author nothing.
+    #
+    # apysource hands these back with their URLs already filled in, so an entry
+    # that named a family — `- label: RFC 9110`, and nothing else — is written out
+    # expanded. What apycite generates is *evidence*, and evidence you need a
+    # pattern table beside you to read is not evidence: a reviewer opening this
+    # file sees the URL that was actually fetched.
     out: list[dict[str, Any]] = []
-    for label, entry in registry.entries.items():
+    for label, entry in sources.entries.items():
         if label not in fragments and not entry.get("fragments"):
-            continue  # a registry entry nobody cites is not evidence of anything
+            continue  # an entry nobody cites is not evidence of anything
         source = {k: v for k, v in entry.items() if k != "fragments"}
         source["fragments"] = list(entry.get("fragments", [])) + fragments.pop(label, [])
         out.append(source)
 
+    # Whatever is left was minted from a pattern: it is cited, and no entry names it.
     for label in sorted(fragments):
-        source = dict(registry.used(label))
+        source = dict(minted[label])
         source.pop("fragments", None)
         source["fragments"] = fragments[label]
         out.append(source)

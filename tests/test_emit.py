@@ -15,29 +15,30 @@ of whether "source-agnostic" is a claim or a decoration.
 import pytest
 import yaml
 from apysource.namespaces import OA, SV
+from apysource.sources import sources_from_data
 from apysource.yaml_input import TARGETTING_KEYS, graph_from_data
 from rdflib import RDF
 
-from apycite.config import LabelRule, SpecPattern
+from apycite.config import LabelRule
 from apycite.emit import EmitError, build, render
 from apycite.grammar import Cite
 from apycite.scan import Found, Site
-from apycite.sources import Registry, SourceError
-
-import re
-
-RFC = SpecPattern(re.compile(r"^RFC (?P<n>\d+)$"),
-                  {"url": "https://www.rfc-editor.org/rfc/rfc{n}.txt",
-                   "type": "text/plain"})
 
 RULES = [LabelRule("src/rules/*.rs", "{stem}"), LabelRule("**/*", "{path}")]
 
 
-def _registry(entries=None):
-    reg = Registry(patterns=[RFC])
-    for entry in entries or []:
-        reg.entries[entry["label"]] = entry
-    return reg
+def _sources(entries=None, patterns=None):
+    """A sources file, through apysource's *real* loader.
+
+    Never a hand-rolled fake. What a source entry may say is apysource's to
+    define, and a second copy of it here is how apycite ends up emitting a key
+    the loader silently stopped accepting. `RFC NNNN` needs no pattern: apysource
+    ships it, which is the whole point of this refactor.
+    """
+    data = {"sources": list(entries or [])}
+    if patterns:
+        data["patterns"] = patterns
+    return sources_from_data(data, "(test)")
 
 
 def _found(*specs):
@@ -49,7 +50,7 @@ def _found(*specs):
 
 def test_the_output_loads_back_through_apysource():
     doc = build(_found(("RFC 9110", "the quote", {"section": "§ 7.2"},
-                        "src/rules/host.rs", 29)), _registry(), RULES)
+                        "src/rules/host.rs", 29)), _sources(), RULES)
 
     graph = graph_from_data(doc)      # the real loader. If it raises, we shipped junk.
     assert list(graph.subjects(RDF.type, SV.Fragment))
@@ -78,7 +79,7 @@ def test_two_cites_in_one_file_to_one_source_do_not_collide():
     doc = build(_found(
         ("RFC 9110", "the first sentence", {"section": "§ 7.2"}, "src/rules/host.rs", 29),
         ("RFC 9110", "the second sentence", {"section": "§ 7.2"}, "src/rules/host.rs", 40),
-    ), _registry(), RULES)
+    ), _sources(), RULES)
 
     labels = [f["label"] for f in doc["sources"][0]["fragments"]]
     assert labels == ["host", "host (2)"]
@@ -94,13 +95,13 @@ def test_the_numbering_does_not_move_when_the_code_does():
     first = build(_found(
         ("RFC 9110", "aaa", {}, "src/rules/host.rs", 29),
         ("RFC 9110", "bbb", {}, "src/rules/host.rs", 40),
-    ), _registry(), RULES)
+    ), _sources(), RULES)
 
     # The same two cites, one shifted a hundred lines down, and swapped in file order.
     second = build(_found(
         ("RFC 9110", "bbb", {}, "src/rules/host.rs", 140),
         ("RFC 9110", "aaa", {}, "src/rules/host.rs", 129),
-    ), _registry(), RULES)
+    ), _sources(), RULES)
 
     def labelled(doc):
         return {f["label"]: f["snippet"] for f in doc["sources"][0]["fragments"]}
@@ -112,7 +113,7 @@ def test_the_same_quote_in_two_files_is_one_fragment_with_two_sites():
     doc = build(_found(
         ("RFC 9110", "the quote", {"section": "§ 7.2"}, "src/rules/a.rs", 3),
         ("RFC 9110", "the quote", {"section": "§ 7.2"}, "src/rules/b.rs", 9),
-    ), _registry(), RULES)
+    ), _sources(), RULES)
 
     fragments = doc["sources"][0]["fragments"]
     assert len(fragments) == 1
@@ -129,7 +130,7 @@ def test_the_same_quote_in_two_files_is_one_fragment_with_two_sites():
     ({"selector": "div.note"}, OA.CssSelector),
 ])
 def test_a_targetter_survives_into_the_graph_as_a_selector(targeting, predicate):
-    doc = build(_found(("RFC 9110", "q", targeting, "a.rs", 1)), _registry(), RULES)
+    doc = build(_found(("RFC 9110", "q", targeting, "a.rs", 1)), _sources(), RULES)
     graph = graph_from_data(doc)
 
     assert list(graph.subjects(RDF.type, predicate)), f"{targeting} did not target"
@@ -140,7 +141,7 @@ def test_a_targetter_survives_into_the_graph_as_a_selector(targeting, predicate)
     ({"location": "chapter-1"}, SV.sourceLocation),
 ])
 def test_a_targetter_survives_into_the_graph_as_a_property(targeting, predicate):
-    doc = build(_found(("RFC 9110", "q", targeting, "a.rs", 1)), _registry(), RULES)
+    doc = build(_found(("RFC 9110", "q", targeting, "a.rs", 1)), _sources(), RULES)
     graph = graph_from_data(doc)
 
     assert list(graph.subject_objects(predicate)), f"{targeting} did not target"
@@ -155,7 +156,7 @@ def test_every_targetting_key_apysource_knows_can_be_emitted():
     """
     targeting = {key: "1" if key.startswith("page") else "x"
                  for key in TARGETTING_KEYS}
-    doc = build(_found(("RFC 9110", "q", targeting, "a.rs", 1)), _registry(), RULES)
+    doc = build(_found(("RFC 9110", "q", targeting, "a.rs", 1)), _sources(), RULES)
 
     fragment = doc["sources"][0]["fragments"][0]
     for key in TARGETTING_KEYS:
@@ -163,14 +164,14 @@ def test_every_targetting_key_apysource_knows_can_be_emitted():
     graph_from_data(doc)
 
 
-# ── The registry ────────────────────────────────────────────────────────
+# ── The sources file ────────────────────────────────────────────────────
 
-def test_a_registry_entry_wins_over_a_pattern():
+def test_an_entry_wins_over_a_pattern():
     """So a project can pin one RFC to datatracker, or to the HTML rendition."""
-    reg = _registry([{"label": "RFC 9110",
-                      "url": "https://datatracker.ietf.org/doc/html/rfc9110",
-                      "type": "text/html"}])
-    doc = build(_found(("RFC 9110", "q", {}, "a.rs", 1)), reg, RULES)
+    doc = build(_found(("RFC 9110", "q", {}, "a.rs", 1)), _sources([
+        {"label": "RFC 9110", "url": "https://datatracker.ietf.org/doc/html/rfc9110",
+         "type": "text/html"},
+    ]), RULES)
 
     assert doc["sources"][0]["url"] == "https://datatracker.ietf.org/doc/html/rfc9110"
 
@@ -178,36 +179,39 @@ def test_a_registry_entry_wins_over_a_pattern():
 def test_hand_written_fragments_survive():
     """The things the grammar deliberately cannot say cost the author nothing:
     the escape hatch is the sources file they already have."""
-    reg = _registry([{
+    doc = build(_found(("Fetch", "a generated quote", {}, "a.rs", 1)), _sources([{
         "label": "Fetch", "url": "https://fetch.spec.whatwg.org/", "type": "text/html",
         "fragments": [{"label": "by hand", "selector": "#origin-header"}],
-    }])
-    doc = build(_found(("Fetch", "a generated quote", {}, "a.rs", 1)), reg, RULES)
+    }]), RULES)
 
     labels = [f["label"] for f in doc["sources"][0]["fragments"]]
     assert labels == ["by hand", "a.rs"]
     graph_from_data(doc)
 
 
-def test_an_uncited_registry_entry_is_not_emitted():
+def test_an_uncited_entry_is_not_emitted():
     """A source nobody cites is not evidence of anything, and fetching it in CI
     would be a request nobody asked for."""
-    reg = _registry([{"label": "Unused", "url": "https://example.org/", "type": "text/html"}])
-    doc = build(_found(("RFC 9110", "q", {}, "a.rs", 1)), reg, RULES)
+    doc = build(_found(("RFC 9110", "q", {}, "a.rs", 1)), _sources([
+        {"label": "Unused", "url": "https://example.org/", "type": "text/html"},
+    ]), RULES)
 
     assert [s["label"] for s in doc["sources"]] == ["RFC 9110"]
 
 
 def test_an_unknown_source_names_the_file_and_line():
+    """apysource answers `None`, because it does not know why we asked. We do."""
     with pytest.raises(EmitError) as exc:
-        build(_found(("Nonesuch", "q", {}, "src/rules/a.rs", 7)), _registry(), RULES)
+        build(_found(("Nonesuch", "q", {}, "src/rules/a.rs", 7)), _sources(), RULES)
 
     assert "src/rules/a.rs:7" in str(exc.value)
     assert "unknown source" in str(exc.value)
 
 
 def test_a_pattern_mints_a_source_apysource_accepts():
-    doc = build(_found(("RFC 9112", "q", {}, "a.rs", 1)), _registry(), RULES)
+    """The pattern is apysource's now, and apycite never learns what an RFC is —
+    it asks, and writes down the answer."""
+    doc = build(_found(("RFC 9112", "q", {}, "a.rs", 1)), _sources(), RULES)
     source = doc["sources"][0]
 
     assert source["url"] == "https://www.rfc-editor.org/rfc/rfc9112.txt"
@@ -215,9 +219,38 @@ def test_a_pattern_mints_a_source_apysource_accepts():
     graph_from_data(doc)
 
 
-def test_the_registry_refuses_an_unresolvable_name():
-    with pytest.raises(SourceError, match="unknown source"):
-        _registry().resolve("Some Book Nobody Registered")
+def test_a_named_entry_is_written_out_expanded():
+    """The sources file may now say `- label: RFC 9110` and nothing else. What
+    apycite *writes* still carries the full url.
+
+    Not a stylistic choice. The generated file carries no `patterns:` block, so an
+    entry emitted as a bare name would be a file apysource could not load — and
+    `render` would refuse it as a bug in apycite, which it would be. It is also
+    the right output: this file is evidence, and evidence you need a pattern table
+    beside you to read is not evidence.
+    """
+    doc = build(_found(("RFC 9110", "a generated quote", {}, "a.rs", 1)), _sources([
+        {"label": "RFC 9110",
+         "fragments": [{"label": "by hand", "lines": "10-12"}]},
+    ]), RULES)
+    source = doc["sources"][0]
+
+    assert source["url"] == "https://www.rfc-editor.org/rfc/rfc9110.txt"
+    assert source["type"] == "text/plain"
+    assert [f["label"] for f in source["fragments"]] == ["by hand", "a.rs"]
+    graph_from_data(doc)          # the guard: no patterns block, and it still loads
+
+
+def test_a_family_the_sources_file_declares_is_reachable_from_a_cite():
+    """A `patterns:` block is apysource's key in apysource's file — but a cite
+    naming a member of that family resolves through it, expanded, all the same."""
+    doc = build(_found(("W3C css-color-4", "q", {}, "a.rs", 1)), _sources(patterns=[
+        {"match": r"^W3C (?P<slug>[a-z0-9-]+)$",
+         "source": {"url": "https://www.w3.org/TR/{slug}/", "type": "text/html"}},
+    ]), RULES)
+
+    assert doc["sources"][0]["url"] == "https://www.w3.org/TR/css-color-4/"
+    graph_from_data(doc)
 
 
 # ── Determinism ─────────────────────────────────────────────────────────
@@ -230,8 +263,8 @@ def test_the_same_cites_render_the_same_bytes():
         ("RFC 9110", "a", {"section": "§ 7.2"}, "src/rules/a.rs", 2),
         ("RFC 9110", "c", {}, "src/rules/m.rs", 3),
     )
-    first = render(build(found, _registry(), RULES))
-    second = render(build(list(reversed(found)), _registry(), RULES))
+    first = render(build(found, _sources(), RULES))
+    second = render(build(list(reversed(found)), _sources(), RULES))
 
     # Bytes, not parsed YAML: `--frozen` diffs the file, and "same data, different
     # order" is still a diff someone has to read and dismiss.

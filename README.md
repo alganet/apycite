@@ -53,7 +53,9 @@ It is a comment, so it fits everywhere a comment fits — above a branch, inside
 reason it is a comment and not a macro.
 
 **`<source>`** names an entry in your sources file. It is *not* a URL. apycite has
-no idea what an RFC is, what HTML is, or where rfc-editor lives.
+no idea what an RFC is, what HTML is, or where rfc-editor lives. That sentence was
+a lie until the pattern that minted rfc-editor links moved out of this package; it
+is not one now.
 
 **`<key>: <value>`** takes **any apysource fragment key** — the list is read from
 apysource at import, not copied. A targetter apysource ships tomorrow works in a
@@ -151,24 +153,30 @@ sources:
 ```
 
 Repo claiming, format detection, section trees, anchor inference, redirect
-surfacing — none of that is apycite's. It is all apysource's, and you reach it by
-writing a source entry.
+surfacing, and turning `RFC 9110` into a URL — none of that is apycite's. It is all
+apysource's, and you reach it by writing a source entry.
 
 Hand-written fragments in that file **survive into the output**, so the things the
 grammar deliberately cannot say (a selector-only fragment, a `part_of` chapter
 tree) cost you nothing.
 
-`RFC NNNN` resolves without an entry, via a shipped pattern. It is config, not a
-branch in the code — so a second family is three lines of TOML, not a release:
+`RFC NNNN` resolves without an entry — not because apycite knows what an RFC is,
+but because **apysource ships the pattern**, next to the fetcher that has to know
+the URL anyway. Another family is a `patterns:` block in the same sources file,
+and it is apysource's key, not apycite's:
 
-```toml
-[[specs]]
-match  = '^W3C (?P<slug>[a-z0-9-]+)$'
-source = { url = "https://www.w3.org/TR/{slug}/", type = "text/html" }
+```yaml
+patterns:
+  - match: '^W3C (?P<slug>[a-z0-9-]+)$'
+    source: {url: "https://www.w3.org/TR/{slug}/", type: text/html}
 ```
 
-Your patterns run before the shipped ones, and the sources file beats both — so
-naming `RFC 9110` yourself, pinned to datatracker, wins.
+An entry beats a pattern, so pinning `RFC 9110` to datatracker is one entry.
+
+What apycite *writes* is the expanded source — full URL, full media type — even
+when the entry that produced it was a bare `- label: RFC 9110`. The generated file
+is evidence, and evidence you have to hold a pattern table beside you to read is
+not evidence. A reviewer sees the URL that was fetched.
 
 ## Commands
 

@@ -36,9 +36,10 @@ pytestmark = pytest.mark.live
 
 SOURCES = """
 sources:
+  # No url. apysource ships the `RFC NNNN` pattern and mints one, and nothing in
+  # either project proves that url actually *fetches* unless something asks for
+  # it against the live document. This is the something.
   - label: RFC 9112
-    url: https://www.rfc-editor.org/rfc/rfc9112.txt
-    type: text/plain
 
   - label: Fetch
     url: https://fetch.spec.whatwg.org/
@@ -143,6 +144,11 @@ def test_extract_reads_five_sources_across_four_languages(project):
     doc = (project / "specs.yaml").read_text()
     for label in ("RFC 9112", "Fetch", "MDN Origin", "UN Charter", "Moby-Dick"):
         assert label in doc, f"{label} did not survive extraction"
+
+    # `RFC 9112` was written into sources.yaml as a bare name. What comes out
+    # carries the url apysource minted for it — the generated file stands alone,
+    # and a reviewer sees the document that was fetched.
+    assert "https://www.rfc-editor.org/rfc/rfc9112.txt" in doc
 
 
 def test_every_quote_is_really_in_the_source(project):

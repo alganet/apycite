@@ -5,11 +5,14 @@
 """``apycite.toml``, read strictly.
 
 Plain ``tomllib``, and no dependency injection. apycite's configuration is
-*data* — a map of extensions to comment styles, a list of patterns, a list of
-label rules. apysource needs apywire because it wires a fetcher into a registry
+*data* — a map of extensions to comment styles, a list of label rules, a
+baseline. apysource needs apywire because it wires a fetcher into a registry
 into four commands; there is nothing here to wire. A DI container to carry a
 dict of file extensions would be ceremony, and it would drag a compile step and
 a generated module along behind it.
+
+Note what is *not* here: where to find a document. That is apysource's sources
+file, not apycite's config, and it was here once — see ``[[specs]]`` below.
 
 Unknown keys are refused, in the shape apysource refuses them: a key we do not
 recognise is a key we ignore, and a setting the author believed was in force and
@@ -18,7 +21,6 @@ was not is the same class of lie as a citation nobody checked.
 
 from __future__ import annotations
 
-import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -26,32 +28,37 @@ from typing import Any
 
 from apycite.comments import NAME_STYLE_MAP, CommentStyle
 
-#: Shipped patterns, applied *after* whatever the project configures — so a
-#: project can pin RFC 9110 to datatracker, or to the HTML rendition, simply by
-#: naming it first. It is config, not a branch in the code: the prototype
-#: hardcoded rfc-editor, and a second spec family (I-Ds, W3C RECs, ECMA) would
-#: then have meant a release rather than three lines of TOML.
-DEFAULT_SPECS: list[dict[str, Any]] = [
-    {
-        "match": r"^RFC (?P<n>\d+)$",
-        "source": {
-            "url": "https://www.rfc-editor.org/rfc/rfc{n}.txt",
-            "type": "text/plain",
-        },
-    },
-]
-
 DEFAULT_EXCLUDE = [
     "**/.git/**", "**/target/**", "**/node_modules/**", "**/__pycache__/**",
     "**/.venv/**", "**/dist/**", "**/build/**",
 ]
 
-_TOP_KEYS = {"apycite", "styles", "specs", "labels", "ratchet"}
+_TOP_KEYS = {"apycite", "styles", "labels", "ratchet"}
 _APYCITE_KEYS = {"roots", "exclude", "sources", "output",
                  "marker_outside_comments"}
-_SPEC_KEYS = {"match", "source"}
 _LABEL_KEYS = {"match", "label"}
 _RATCHET_KEYS = {"scope", "baseline", "exclude"}
+
+#: What ``[[specs]]`` used to do, and where it went.
+#:
+#: It mapped a name like ``RFC 9110`` to an rfc-editor URL — which meant apycite
+#: shipped a hardcoded rfc-editor link while its own README said it "has no idea
+#: what an RFC is, or where rfc-editor lives". Turning a name into a URL is the
+#: job of the tool that then fetches the URL, and it now is one: apysource ships
+#: the RFC pattern, and a `patterns:` block in the sources file adds a family.
+_SPECS_MOVED = (
+    "[[specs]] moved to apysource. Turning a name like 'RFC 9110' into a URL is "
+    "the job of the tool that fetches the URL — apycite has no idea what an RFC "
+    "is, and it has no business minting rfc-editor links. Write the pattern in "
+    "your sources file instead:\n"
+    "\n"
+    "    patterns:\n"
+    "      - match: '^W3C (?P<slug>[a-z0-9-]+)$'\n"
+    "        source: {url: 'https://www.w3.org/TR/{slug}/', type: text/html}\n"
+    "\n"
+    "'RFC NNNN' needs no pattern at all — apysource ships it. What apycite writes "
+    "out is unchanged: the expanded URL, as before."
+)
 
 
 class ConfigError(Exception):
@@ -71,21 +78,6 @@ def _reject_unknown(table: dict[str, Any], allowed: set[str], what: str) -> None
 
 
 @dataclass(frozen=True)
-class SpecPattern:
-    """A name shaped like ``RFC 9110`` -> a source entry apysource can read."""
-
-    pattern: re.Pattern[str]
-    source: dict[str, str]
-
-    def resolve(self, name: str) -> dict[str, str] | None:
-        match = self.pattern.match(name)
-        if match is None:
-            return None
-        fields = match.groupdict()
-        return {k: v.format(**fields) for k, v in self.source.items()}
-
-
-@dataclass(frozen=True)
 class LabelRule:
     """A path -> the fragment label a cite in it gets."""
 
@@ -102,7 +94,6 @@ class Config:
     output: str = "specs.yaml"
     marker_outside_comments: str = "error"
     styles: dict[str, type[CommentStyle]] = field(default_factory=dict)
-    specs: list[SpecPattern] = field(default_factory=list)
     labels: list[LabelRule] = field(default_factory=list)
     ratchet_scope: str | None = None
     ratchet_baseline: str | None = None
@@ -136,49 +127,22 @@ def _load_style(value: str, key: str) -> type[CommentStyle]:
     return obj
 
 
-def _spec_patterns(raw: list[dict[str, Any]]) -> list[SpecPattern]:
-    out = []
-    for i, entry in enumerate(raw, 1):
-        what = f"[[specs]] #{i}"
-        _reject_unknown(entry, _SPEC_KEYS, what)
-        if "match" not in entry or "source" not in entry:
-            raise ConfigError(f"{what}: needs both 'match' and 'source'")
-
-        source = entry["source"]
-        if not isinstance(source, dict) or "url" not in source:
-            raise ConfigError(f"{what}: 'source' must be a table with a 'url'")
-
-        try:
-            pattern = re.compile(entry["match"])
-        except re.error as exc:
-            raise ConfigError(f"{what}: bad regex {entry['match']!r}: {exc}") from None
-
-        # A template with a field the pattern never captures is a 404 waiting to
-        # happen, and it is knowable *now*. `str.format` would raise at the first
-        # citation that used it, weeks later, from a stack trace.
-        names = set(pattern.groupindex)
-        for key, template in source.items():
-            for field_name in re.findall(r"\{(\w+)\}", str(template)):
-                if field_name not in names:
-                    raise ConfigError(
-                        f"{what}: source.{key} uses {{{field_name}}}, which "
-                        f"'{entry['match']}' does not capture. Captured: "
-                        f"{', '.join(sorted(names)) or '(none)'}",
-                    )
-        out.append(SpecPattern(pattern, {k: str(v) for k, v in source.items()}))
-    return out
-
-
 def load(path: Path | None, root: Path) -> Config:
     """Read ``apycite.toml``. Absent is fine — the defaults are a working tool."""
     config = Config(root=root)
 
     if path is None or not path.exists():
-        config.specs = _spec_patterns(DEFAULT_SPECS)
         return config
 
     with open(path, "rb") as handle:
         data = tomllib.load(handle)
+
+    # Named before the generic refusal, which would say "unknown key 'specs'" —
+    # true, and useless. It would not say that the feature still exists one
+    # project over, and a project whose W3C names had silently stopped resolving
+    # would find that out at the cite, blaming the wrong thing.
+    if "specs" in data:
+        raise ConfigError(_SPECS_MOVED)
 
     _reject_unknown(data, _TOP_KEYS, str(path))
 
@@ -198,11 +162,6 @@ def load(path: Path | None, root: Path) -> Config:
 
     config.styles = {k.lower(): _load_style(v, k)
                      for k, v in data.get("styles", {}).items()}
-
-    # The project's patterns first, the shipped ones after: naming `RFC 9110`
-    # yourself must be able to win.
-    config.specs = (_spec_patterns(data.get("specs", []))
-                    + _spec_patterns(DEFAULT_SPECS))
 
     for i, rule in enumerate(data.get("labels", []), 1):
         _reject_unknown(rule, _LABEL_KEYS, f"[[labels]] #{i}")

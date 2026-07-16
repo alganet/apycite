@@ -55,16 +55,40 @@ def _rule(project: Path, name: str, body: str = "") -> Path:
 # ── extract ─────────────────────────────────────────────────────────────
 
 def test_extract_writes_a_file_apysource_can_read(project):
+    """Note the config: no `sources` key at all. `RFC 9112` still resolves — the
+    pattern is apysource's, and it ships. apycite never learns what an RFC is.
+
+    And the url it writes is the *expanded* one. The generated file is evidence,
+    and a reviewer opening it must see the URL that was actually fetched, not a
+    name they would have to hold a pattern table beside them to resolve.
+    """
     _rule(project, "host", f"fn f() {{\n    {CITE}\n}}")
 
     assert main(["extract"]) == 0
 
     doc = yaml.safe_load((project / "specs.yaml").read_text())
     assert doc["sources"][0]["label"] == "RFC 9112"
+    assert doc["sources"][0]["url"] == "https://www.rfc-editor.org/rfc/rfc9112.txt"
     fragment = doc["sources"][0]["fragments"][0]
     assert fragment["label"] == "host"
     assert fragment["section"] == "§ 3.2"
     assert fragment["cited_by"] == [{"file": "src/rules/host.rs", "line": 2}]
+
+
+def test_a_sources_file_that_is_not_there_blames_the_config(project, capsys):
+    """It is *our* config that named a file that is not there. A bare
+    FileNotFoundError out of apysource would read as "error: [Errno 2] ...",
+    which blames the tool that was asked rather than the one that asked."""
+    (project / "apycite.toml").write_text(
+        CONFIG + '\n', encoding="utf-8")
+    (project / "apycite.toml").write_text(
+        CONFIG.replace('output = "specs.yaml"',
+                       'output = "specs.yaml"\nsources = "nope.yaml"'),
+        encoding="utf-8")
+    _rule(project, "host", f"fn f() {{\n    {CITE}\n}}")
+
+    assert main(["extract"]) == 1
+    assert "sources file not found" in capsys.readouterr().err
 
 
 def test_extracting_nothing_is_not_a_pass(project):
