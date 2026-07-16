@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from apycite.comments import NAME_STYLE_MAP
+from apycite.config import DEFAULT_EXCLUDE
 from apycite.scan import Report, scan, scan_file
 
 
@@ -52,6 +53,34 @@ def test_every_file_walked_lands_in_exactly_one_bucket(tmp_path):
     assert len(report.binary) == 1      # bin.dat
     assert len(report.excluded) == 1    # vendor/d.rs
     assert not report.errors
+
+
+def test_the_shipped_defaults_exclude_a_top_level_directory(tmp_path):
+    """The promise is DEFAULT_EXCLUDE's, so the test states it in those terms.
+
+    `**/.git/**` compiled to a regex demanding a separator before the name, so it
+    excluded a *nested* .git and never the repository's own. Every shipped default
+    names a directory that lives at the root, so every one of them was inert
+    exactly where it was meant to fire — and `apycite extract` at a repo root
+    (the only place it is ever run) died on unreadable git objects.
+
+    Asserting against a hand-written `vendor/*` could not have caught this. The
+    pattern that ships is the one that has to hold.
+    """
+    (tmp_path / ".git" / "objects").mkdir(parents=True)
+    (tmp_path / ".git" / "objects" / "ab19f").write_bytes(b"\x78\x01\x93\xff")
+
+    report = _scan(tmp_path, {
+        "a.rs": CITE,
+        "target/debug/build.rs": CITE,
+        "node_modules/pkg/index.js": CITE,
+        "nested/target/debug/build.rs": CITE,
+    }, exclude=list(DEFAULT_EXCLUDE))
+
+    assert len(report.parsed) == 1                       # a.rs, and nothing else
+    assert len(report.excluded) == 4                     # incl. the git object
+    assert not report.errors                             # nothing unreadable survived
+    assert len(report.cites) == 1                        # not 4 — the tree has one cite
 
 
 def test_a_binary_file_is_skipped_and_counted(tmp_path):

@@ -323,7 +323,18 @@ def scan_file(
 
 
 def _excluded(rel: str, patterns: list[str]) -> bool:
-    return any(fnmatch.fnmatch(rel, pat) for pat in patterns)
+    for pat in patterns:
+        if fnmatch.fnmatch(rel, pat):
+            return True
+        # `**/` means "at any depth, including none". fnmatch has no path
+        # semantics to say that: it compiles the prefix to a regex demanding a
+        # separator before the name, so `**/.git/**` matched a *nested* .git and
+        # never the one at the root — which is the only .git a repository has.
+        # Every shipped default (.git, target, node_modules, dist, build) lives
+        # at the root, so every one of them was inert where it was needed.
+        if pat.startswith("**/") and fnmatch.fnmatch(rel, pat[3:]):
+            return True
+    return False
 
 
 def scan(
