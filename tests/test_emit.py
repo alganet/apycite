@@ -123,6 +123,74 @@ def test_the_same_quote_in_two_files_is_one_fragment_with_two_sites():
     ]
 
 
+# ── A per-cite label: a fragment can name itself ────────────────────────
+
+def test_an_explicit_label_overrides_the_path_based_one():
+    """A cite may name its fragment instead of inheriting the citing file's path —
+    the fix for a helper's path standing in for the sentence it enforces."""
+    doc = build([
+        Found(
+            Cite("RFC 9110", "the entity-tag equivalence sentence",
+                 {"section": "§ 8.8.3"}, label="entity-tag equivalence"),
+            Site("src/helpers/headers.rs", 1045),
+        ),
+    ], _sources(), RULES)
+
+    labels = [f["label"] for f in doc["sources"][0]["fragments"]]
+    assert labels == ["entity-tag equivalence"]
+    graph_from_data(doc)      # apysource accepts the named fragment
+
+
+def test_a_labelled_cite_is_left_out_of_sibling_numbering():
+    """A named fragment does not consume a `(N)` slot, so its unlabelled siblings do
+    not skip one — they stay `host`, `host (2)`."""
+    doc = build([
+        Found(Cite("RFC 9110", "aaa first", {}), Site("src/rules/host.rs", 10)),
+        Found(Cite("RFC 9110", "bbb named", {}, label="the-key-sentence"),
+              Site("src/rules/host.rs", 20)),
+        Found(Cite("RFC 9110", "ccc third", {}), Site("src/rules/host.rs", 30)),
+    ], _sources(), RULES)
+
+    labels = sorted(f["label"] for f in doc["sources"][0]["fragments"])
+    assert labels == ["host", "host (2)", "the-key-sentence"]
+    graph_from_data(doc)
+
+
+def test_a_shared_sentence_is_named_from_whichever_site_labels_it():
+    """The same sentence in two files is one fragment; if either site names it, that
+    name wins regardless of which the walk reaches first — here the labelled site is
+    second, and its name still takes over the path-derived default."""
+    doc = build([
+        Found(Cite("RFC 9110", "one shared sentence", {"section": "§ 8.8.3"}),
+              Site("src/helpers/headers.rs", 100)),
+        Found(Cite("RFC 9110", "one shared sentence", {"section": "§ 8.8.3"},
+                   label="etag equivalence"),
+              Site("src/rules/etag.rs", 5)),
+    ], _sources(), RULES)
+
+    fragments = doc["sources"][0]["fragments"]
+    assert len(fragments) == 1
+    assert fragments[0]["label"] == "etag equivalence"
+    assert len(fragments[0]["cited_by"]) == 2
+
+
+def test_a_base_label_is_the_alphabetically_first_citing_path():
+    """A shared, *unlabelled* fragment is named for whichever citing path sorts first —
+    the behaviour a per-cite label exists to override, pinned here so the override has
+    something to be measured against."""
+    doc = build([
+        Found(Cite("RFC 9110", "the shared claim", {"section": "§ 8.8.3"}),
+              Site("src/rules/zzz.rs", 5)),
+        Found(Cite("RFC 9110", "the shared claim", {"section": "§ 8.8.3"}),
+              Site("src/helpers/headers.rs", 100)),
+    ], _sources(), RULES)
+
+    fragments = doc["sources"][0]["fragments"]
+    assert len(fragments) == 1
+    # helpers/headers.rs sorts before rules/zzz.rs, so its {path} label wins.
+    assert fragments[0]["label"] == "src/helpers/headers.rs"
+
+
 # ── P5: every apysource targetter, from a comment ───────────────────────
 
 @pytest.mark.parametrize(("targeting", "predicate"), [

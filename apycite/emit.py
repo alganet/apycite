@@ -45,7 +45,12 @@ def _dedupe(found: list[Found]) -> list[tuple[Any, list[Site]]]:
 
     for entry in found:
         key = entry.cite.key()
-        if key not in order:
+        # First occurrence sets the order; a later occurrence that *names* the fragment
+        # takes over, so a shared sentence can be labelled from any one of its sites
+        # rather than only the first the walk happened to reach.
+        if key not in order or (
+            entry.cite.label is not None and order[key].label is None
+        ):
             order[key] = entry.cite
         claims[key].append(entry.site)
 
@@ -88,7 +93,8 @@ def build(
     # Grouped by (source, base label) and numbered in an order that depends only
     # on what the citation *says*. Two cites in one file against one source get
     # `rule` and `rule (2)`, and which is which does not change when someone adds
-    # a line above them.
+    # a line above them. A cite that carries an explicit `label` names itself and is
+    # left out of the numbering, so its siblings stay `rule`, `rule (2)` without a gap.
     groups: dict[tuple[str, str], list[tuple[Any, list[Site]]]] = defaultdict(list)
     for cite, sites, source_label in resolved:
         base = label_for(sites[0].file, rules)
@@ -106,8 +112,14 @@ def build(
             sorted(m[0].targeting.items()),
             m[0].quote,
         ))
-        for index, (cite, sites) in enumerate(members):
-            fragment: dict[str, Any] = {"label": disambiguate(base, index)}
+        index = 0
+        for cite, sites in members:
+            if cite.label is not None:
+                fragment_label = cite.label
+            else:
+                fragment_label = disambiguate(base, index)
+                index += 1
+            fragment: dict[str, Any] = {"label": fragment_label}
             fragment.update(dict(sorted(cite.targeting.items())))
             fragment["snippet"] = cite.quote
             fragment["cited_by"] = [{"file": s.file, "line": s.line} for s in sites]

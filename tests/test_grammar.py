@@ -229,6 +229,36 @@ def test_a_comma_inside_a_value_is_not_an_argument_boundary():
     assert cite.targeting == {"selector": "h1, h2"}
 
 
+# ── The label, apycite's own key ────────────────────────────────────────
+
+def test_a_label_names_the_fragment_and_stays_out_of_targeting():
+    """`label` is apycite's own key: it names the fragment, and must never reach
+    apysource as a targeting instruction — so it is kept out of `targeting`."""
+    cite = parse('cite(RFC 9110 § 15, label: status-code range): '
+                 '"All valid status codes are within the range of 100 to 599."')
+    assert cite.label == "status-code range"
+    assert cite.targeting == {"section": "§ 15"}
+    assert "label" not in cite.targeting
+
+
+def test_a_label_round_trips():
+    cite = parse('cite(Fetch, selector: h1, label: the header): "one whole sentence"')
+    assert cite.label == "the header"
+    assert parse(render(cite)) == cite
+
+
+def test_a_label_is_not_part_of_dedup_identity():
+    """Two places citing the same sentence are one claim whether or not one names it."""
+    bare = parse('cite(RFC 1 § 2): "one whole sentence here"')
+    named = parse('cite(RFC 1 § 2, label: the-claim): "one whole sentence here"')
+    assert bare.key() == named.key()
+
+
+def test_a_label_given_twice_is_refused():
+    with pytest.raises(CiteError, match="'label' given twice"):
+        parse('cite(RFC 1, label: a, label: b): "one whole sentence here"')
+
+
 # ── P3: the marker theorem ──────────────────────────────────────────────
 
 @pytest.mark.parametrize(("cite", "style", "placement"), CASES, ids=IDS)

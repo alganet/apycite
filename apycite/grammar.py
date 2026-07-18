@@ -63,6 +63,15 @@ MARKER = re.compile(r"(?<![A-Za-z0-9_])cite\s*\(")
 #: What a cite may target, and it is apysource's list, not ours.
 KEYS = frozenset(TARGETTING_KEYS)
 
+#: Keys apycite consumes itself rather than passing to apysource. ``label`` names the
+#: fragment in the generated store — so a cite can name itself instead of inheriting the
+#: path of whichever file happens to sort first. It is deliberately *not* a targeting
+#: key: apysource excludes ``label`` from ``TARGETTING_KEYS`` for the same reason it
+#: excludes ``snippet`` and ``cited_by`` — those say what to *call* a fragment, or what it
+#: *is*, not where in the document to look. So apycite owns it, and drops it before the
+#: fragment reaches apysource.
+OWN_KEYS = frozenset({"label"})
+
 #: A comma ends a value only when something *shaped like* a key — a bare word and
 #: a colon — follows it. Anything else is part of the value, which is what lets
 #: ``selector: h1, h2`` (real CSS) parse in a grammar that has no escapes at all.
@@ -93,6 +102,10 @@ class Cite:
     source: str
     quote: str
     targeting: dict[str, str] = field(default_factory=dict)
+    #: An apycite-owned name for the fragment, or ``None`` to be named by path. Kept out
+    #: of ``key()`` on purpose: two places citing the same sentence are still one claim
+    #: whether or not one of them chose to name it.
+    label: str | None = None
 
     def key(self) -> tuple:
         """Identity for de-duplication: the same claim, however many places make it."""
@@ -208,16 +221,22 @@ def parse(payload: str) -> Cite | None:
         raise CiteError("the quote is empty — a citation that quotes nothing "
                         "makes no claim anybody can check")
 
-    source, targeting = _parse_args(text[len("cite("):close])
-    return Cite(source=source, quote=quote, targeting=targeting)
+    source, targeting, label = _parse_args(text[len("cite("):close])
+    return Cite(source=source, quote=quote, targeting=targeting, label=label)
 
 
-def _parse_args(args: str) -> tuple[str, dict[str, str]]:
-    """``RFC 9110 § 7.2, selector: h1, h2`` -> ``("RFC 9110", {...})``."""
+def _parse_args(args: str) -> tuple[str, dict[str, str], str | None]:
+    """``RFC 9110 § 7.2, selector: h1, h2`` -> ``("RFC 9110", {...}, None)``.
+
+    Returns the source, the apysource targeting keys, and apycite's own ``label`` (or
+    ``None``) — kept apart because the label must never reach apysource as a targeting
+    instruction.
+    """
     parts = _SPLIT.split(args)
     source_part, rest = parts[0], parts[1:]
 
     targeting: dict[str, str] = {}
+    own: dict[str, str] = {}
 
     if _SECTION_SUGAR in source_part:
         source_part, section = source_part.split(_SECTION_SUGAR, 1)
@@ -235,22 +254,25 @@ def _parse_args(args: str) -> tuple[str, dict[str, str]]:
     for part in rest:
         key, _, value = part.partition(":")
         key, value = key.strip(), value.strip()
-        if key not in KEYS:
+        own_key = key in OWN_KEYS
+        if not own_key and key not in KEYS:
             raise CiteError(
                 f"unknown targetting key {key!r}. apysource knows: "
-                f"{', '.join(sorted(KEYS))}",
+                f"{', '.join(sorted(KEYS))}; apycite also takes: "
+                f"{', '.join(sorted(OWN_KEYS))}",
             )
         if not value:
             raise CiteError(f"{key!r} was given no value")
-        if key in targeting:
+        dest = own if own_key else targeting
+        if key in dest:
             raise CiteError(
                 f"{key!r} given twice"
                 + (" (the '§' sugar is already a section)"
                    if key == "section" else ""),
             )
-        targeting[key] = value
+        dest[key] = value
 
-    return source, targeting
+    return source, targeting, own.get("label")
 
 
 def render(cite: Cite) -> str:
@@ -266,5 +288,7 @@ def render(cite: Cite) -> str:
 
     for key in sorted(targeting):
         args += f", {key}: {targeting[key]}"
+    if cite.label is not None:
+        args += f", label: {cite.label}"
 
     return f'cite({args}): "{cite.quote}"'

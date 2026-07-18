@@ -57,9 +57,15 @@ no idea what an RFC is, what HTML is, or where rfc-editor lives. That sentence w
 a lie until the pattern that minted rfc-editor links moved out of this package; it
 is not one now.
 
-**`<key>: <value>`** takes **any apysource fragment key** — the list is read from
+**`<key>: <value>`** takes **any apysource targeting key** — the list is read from
 apysource at import, not copied. A targetter apysource ships tomorrow works in a
 cite tomorrow, with no release of this package.
+
+**`label: <name>`** is apycite's own key, not a targeting one. It names the fragment
+in the generated store, so a cite can name itself for the sentence it enforces instead
+of inheriting the path of whichever file happens to sort first. A labelled cite is left
+out of the `(2)`, `(3)` numbering, and the same sentence cited in several places can be
+named from any one of them.
 
 **`§ <section>`** is sugar for `, section: "§ …"`, because a codebase citing RFCs
 writes hundreds of them. One sugar; the general form is right there.
