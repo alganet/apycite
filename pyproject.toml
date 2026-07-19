@@ -32,8 +32,14 @@ classifiers = [
 # A floor, and a real one: turning a name like `RFC 9110` into a url is apysource's
 # — 0.5.0 is where it landed — and apycite cannot fall back to a copy of it. A copy
 # is what this dependency exists to prevent.
+#
+# The floor is 0.5.1 now, and for a second real reason: 0.5.1 is where apysource
+# learned to read the RFC text apycite's citations are written against — rejoining a
+# token split at a line-wrap hyphen, dropping the running page header, resolving an
+# appendix and an old-style indented heading. A cite this tool helps write is only as
+# good as apysource's ability to find it again, so the two move together.
 dependencies = [
-    "apysource>=0.5.0",
+    "apysource>=0.5.1",
     "pyyaml>=6.0",
 ]
 
