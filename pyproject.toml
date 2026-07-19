@@ -33,13 +33,14 @@ classifiers = [
 # — 0.5.0 is where it landed — and apycite cannot fall back to a copy of it. A copy
 # is what this dependency exists to prevent.
 #
-# The floor is 0.5.1 now, and for a second real reason: 0.5.1 is where apysource
+# The floor is 0.5.2 now, and for a second real reason: 0.5.1–0.5.2 is where apysource
 # learned to read the RFC text apycite's citations are written against — rejoining a
 # token split at a line-wrap hyphen, dropping the running page header, resolving an
-# appendix and an old-style indented heading. A cite this tool helps write is only as
-# good as apysource's ability to find it again, so the two move together.
+# appendix, and resolving an old-style indented heading, including the mixed RFC 1123
+# shape that 0.5.2 completed. A cite this tool helps write is only as good as apysource's
+# ability to find it again, so the two move together.
 dependencies = [
-    "apysource>=0.5.1",
+    "apysource>=0.5.2",
     "pyyaml>=6.0",
 ]
 
