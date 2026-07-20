@@ -39,8 +39,19 @@ classifiers = [
 # appendix, and resolving an old-style indented heading, including the mixed RFC 1123
 # shape that 0.5.2 completed. A cite this tool helps write is only as good as apysource's
 # ability to find it again, so the two move together.
+#
+# 0.6.0 raises it again, for three things apycite now depends on outright.
+# `SourceSet.base` — without it the sources file's `base:` is dropped from the
+# generated file, and identifiers silently fall back to the `urn:apysource:`
+# form that collides with every other project citing the same sentence.
+# `apysource.serialize` — the RDF lane emits through apysource rather than
+# restating what apysource RDF looks like. And deterministic blank-node labels:
+# before them, serializing the same citations twice produced two different
+# documents, so `extract --frozen` on a turtle file would have reported a diff
+# on every commit. The turtle lane is not merely nicer on 0.6.0; it is wrong
+# before it.
 dependencies = [
-    "apysource>=0.5.2",
+    "apysource>=0.6.0",
     "pyyaml>=6.0",
 ]
 
@@ -62,7 +73,7 @@ dev = [
     # for apysource — `conforms` returns "did not run" without it — so a suite that
     # merely imports it would go green having validated nothing, which is the
     # failure both these tools exist to abolish.
-    "apysource[shacl]>=0.5.2",
+    "apysource[shacl]>=0.6.0",
 ]
 
 [tool.setuptools.dynamic]
