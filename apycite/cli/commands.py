@@ -122,6 +122,8 @@ def verify(config: Config, *, strict_redirects: bool = False,
 
     import yaml
 
+    from apycite.emit import SafeLoader
+
     report = _scan(config)
     if _complain(report):
         return 1
@@ -130,7 +132,10 @@ def verify(config: Config, *, strict_redirects: bool = False,
         return 1
 
     try:
-        document = yaml.safe_load(_document(config, report))
+        # Still a full round trip through text — this proves the file we would
+        # *write* parses back, which reusing the in-memory graph would not. Only
+        # the parser is faster; the guard is the same one.
+        document = yaml.load(_document(config, report), Loader=SafeLoader)
     except Exception as exc:                    # noqa: BLE001
         print(f"error: {exc}", file=sys.stderr)
         return 1

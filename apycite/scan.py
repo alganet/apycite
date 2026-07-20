@@ -15,19 +15,37 @@ tool's own colours.
 
 So the walk rests on a theorem — every cite contains the literal ``cite(``
 (``grammar.MARKER``, asserted over every style and placement in the tests) — and
-on one rule that follows from it:
+on one rule that follows from it.
+
+Two things are skipped on that authority, and they are not the same skip. A file
+whose *language* is unknown is skipped when it has no ``MARKER``, which is what
+the theorem says outright. A file whose language is known skips only its *lexer*,
+and needs a wider licence: this module reports near-misses too — text that
+announces itself as a citation and then fails to parse — which ``MARKER`` does
+not match. ``PROBE`` below is that wider licence, and why it is the bare
+substring rather than the marker.
+
+The rule itself:
 
     **Every file walked lands in exactly one bucket: parsed with a known comment
     style, proven free of cite-shaped text, unreadable and reported, or excluded
     by a glob someone wrote down. There is no fifth bucket, and "we did not
     recognise the extension" is not one of them.**
 
-``sum(buckets) == files walked`` is a test.
+``sum(buckets) == paths walked`` is a test.
+
+One nuance in ``excluded``: a glob that excludes everything under a directory is
+answered by not entering the directory, and the *directory* is what gets counted.
+So that bucket holds paths rather than files, and a pruned directory contributes
+one entry however many files are inside it. Enumerating them would mean walking
+the very tree the glob said to skip, which is the cost the glob exists to avoid —
+and we did not look inside, so claiming a count would be inventing one.
 """
 
 from __future__ import annotations
 
 import fnmatch
+import os
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -42,6 +60,27 @@ from apycite.grammar import (
     parse,
     quote_is_closed,
 )
+
+
+#: The four characters every citation — and every complaint about one — must
+#: contain. A file without them is not read past its decode.
+#:
+#: It is deliberately looser than ``MARKER``, and the difference is the whole
+#: point. ``MARKER`` covers every *valid* cite, which is what licenses skipping
+#: a file whose language we do not know. But this module also reports things
+#: that are **not** valid cites: ``is_near_miss`` matches ``cite\b`` as well as
+#: ``cite\s*\(``, so ``// cite this properly please`` announces itself, fails to
+#: parse, and is an error. ``MARKER`` does not see it.
+#:
+#: Guarding the lexer on ``MARKER`` would therefore turn that reported error into
+#: silence — a dropped diagnostic, wearing this tool's own colours. So the guard
+#: has to be a superset of ``MARKER`` *and* ``is_near_miss``, and since both begin
+#: with these four characters, the bare substring is exactly that union — and is
+#: a plain C-level ``str.__contains__`` besides, cheaper than either regex.
+#:
+#: Being loose costs almost nothing: on a real tree ``cite(`` appears in 2 files
+#: per 3000 and ``cite`` in 69, so the safe probe still skips ~97% of the lexing.
+PROBE = "cite"
 
 
 @dataclass(frozen=True)
@@ -67,6 +106,10 @@ class Report:
     The buckets are printed on every run. The difference between this and a
     silent skip is the entire feature: "I did not look here, and here is the
     list" is a report; leaving it out is a lie of omission.
+
+    ``excluded`` counts **paths**, not files: a directory pruned by a glob is one
+    entry, because the walk never entered it and so cannot say what was inside.
+    ``walked`` is the sum of the buckets, and inherits that reading.
     """
 
     cites: list[Found] = field(default_factory=list)
@@ -255,13 +298,20 @@ def scan_file(
         report.binary.append(path)
         return
 
+    # Nothing below this line can find anything in a file that does not contain
+    # the four characters `cite`, so most of a real tree stops here — and the
+    # decode above still happened, so a file we could not read is still an error
+    # rather than a quiet pass. See PROBE.
+    has_probe = PROBE in text
+
     match = get_comment_style(path, overrides)
 
     if match.style is None:
-        # The theorem earns its keep here, and nowhere else. We have no comment
-        # style, so we cannot parse — but we can still ask the one question that
-        # needs no language at all, and the answer is checkable.
-        for lineno, raw in enumerate(text.splitlines(), 1):
+        # The theorem earns its keep here. We have no comment style, so we
+        # cannot parse — but we can still ask the one question that needs no
+        # language at all, and the answer is checkable.
+        lines = enumerate(text.splitlines(), 1) if has_probe else ()
+        for lineno, raw in lines:
             if MARKER.search(raw):
                 report.errors.append(
                     f"{rel}:{lineno}: cite-shaped text, but apycite has no "
@@ -274,6 +324,12 @@ def scan_file(
         return
 
     report.parsed.append(path)
+
+    # Read, and provably clean. Everything below would run and find nothing:
+    # no payload can be a near-miss, so `accounted` stays empty, and
+    # `_payload_cites` has no marker to reconcile. Same report, none of the work.
+    if not has_probe:
+        return
 
     # Lexed in full before anything is parsed, because a quote may run onto the
     # lines below it and the reader has to be able to look ahead.
@@ -337,6 +393,89 @@ def _excluded(rel: str, patterns: list[str]) -> bool:
     return False
 
 
+def _prune_prefixes(patterns: list[str]) -> list[str]:
+    """The directory prefixes a pattern set says to not descend into at all.
+
+    Only a pattern that excludes *everything* beneath a directory licenses
+    skipping that directory, and that is what a trailing ``/*`` or ``/**`` says.
+    Both forms behave identically here, because fnmatch has no path semantics:
+    it compiles ``*`` to ``.*``, which crosses separators. So ``vendor/*``
+    already matches ``vendor/sub/deep.rs``, and prunes just as soundly.
+
+    A pattern of any other shape (``*.min.js``, ``docs/*.md``) prunes nothing
+    and its files go on being enumerated and tested one at a time.
+    """
+    prefixes = []
+    for pat in patterns:
+        for suffix in ("/**", "/*"):
+            if pat.endswith(suffix):
+                prefixes.append(pat[: -len(suffix)])
+                break
+    return prefixes
+
+
+def _pruned(rel: str, prefixes: list[str]) -> bool:
+    """Is this directory one we were told not to enter?
+
+    Two-shot, for the same reason ``_excluded`` is: ``**/`` means "at any depth,
+    including none", and fnmatch cannot say that on its own.
+    """
+    for prefix in prefixes:
+        if fnmatch.fnmatch(rel, prefix):
+            return True
+        if prefix.startswith("**/") and fnmatch.fnmatch(rel, prefix[3:]):
+            return True
+    return False
+
+
+def _walk(base: Path, base_rel: str, prefixes: list[str],
+          report: Report) -> list[tuple[str, str]]:
+    """Every file under ``base``, as ``(rel, abs)`` strings, pruned directories
+    never entered.
+
+    ``rglob`` enumerated the whole tree before exclusion was applied one file at
+    a time, so a repository's ``.git`` was fully stat'd on every run only to be
+    thrown away — which on a repo with a hundred thousand loose objects is the
+    entire cost of the scan. Stopping at the directory is the same answer for
+    less work.
+
+    A pruned directory is reported **as itself**. That is a real change to what
+    ``excluded`` counts (paths, not files), and it is the honest reading: we did
+    not look inside, so we cannot enumerate what is there.
+
+    The path relative to the root is threaded down the walk as a plain string
+    rather than recovered afterwards with ``Path.relative_to``, which costs
+    ~40µs a call — on a 20 000-file tree that one method was more of the scan
+    than reading every file in it. A child's relative path is its parent's plus
+    a separator and a name; there is nothing to recompute.
+
+    Symlinks are not followed and not returned, matching ``rglob``, which does
+    not descend into them either. The path is deliberately never resolved.
+    """
+    files: list[tuple[str, str]] = []
+    stack = [(str(base), base_rel)]
+    while stack:
+        parent, parent_rel = stack.pop()
+        try:
+            entries = list(os.scandir(parent))
+        except OSError:
+            # A directory we cannot list is not a file we failed to read, and
+            # `rglob` was equally silent about it. Nothing to report.
+            continue
+        for entry in entries:
+            if entry.is_symlink():
+                continue
+            rel = f"{parent_rel}/{entry.name}" if parent_rel else entry.name
+            if entry.is_dir(follow_symlinks=False):
+                if _pruned(rel, prefixes):
+                    report.excluded.append(Path(entry.path))
+                else:
+                    stack.append((entry.path, rel))
+            else:
+                files.append((rel, entry.path))
+    return files
+
+
 def scan(
     root: Path, roots: list[str], exclude: list[str],
     overrides: dict[str, type[CommentStyle]] | None = None,
@@ -344,6 +483,7 @@ def scan(
 ) -> Report:
     """Walk the configured roots. Every file lands in exactly one bucket."""
     report = Report()
+    prefixes = _prune_prefixes(exclude)
 
     for scan_root in roots:
         # Not resolved. Resolving would follow a symlinked source directory out
@@ -351,13 +491,23 @@ def scan(
         # and the path relative to the root is what goes into `cited_by`. An
         # absolute path out of somebody's home directory is not a citation.
         base = root / scan_root
-        for path in sorted(base.rglob("*")):
-            if path.is_dir() or path.is_symlink():
-                continue
-            rel = str(path.relative_to(root))
+        # The root itself is "", so its children's relative paths are bare
+        # names — which is what `_excluded` has always been given.
+        base_rel = "" if scan_root in (".", "") else scan_root.replace(os.sep, "/")
+
+        # Sorted on the relative path, which orders identically to sorting the
+        # absolute ones: they share a prefix, so the suffix decides. That is the
+        # order `sorted(rglob(...))` produced, and `extract --frozen` compares
+        # bytes, so it is not ours to change.
+        for rel, abs_path in sorted(_walk(base, base_rel, prefixes, report)):
             if _excluded(rel, exclude):
-                report.excluded.append(path)
+                report.excluded.append(Path(abs_path))
                 continue
-            scan_file(path, rel, report, overrides, marker_outside)
+            scan_file(Path(abs_path), rel, report, overrides, marker_outside)
+
+    # The walk visits directories in stack order, so pruned entries arrive in
+    # whatever order the filesystem listed them. Nothing reads this list but its
+    # length; sorting costs nothing and keeps two runs comparable.
+    report.excluded.sort()
 
     return report

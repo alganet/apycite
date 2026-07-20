@@ -26,7 +26,7 @@ import pytest
 
 from apycite import comments
 from apycite.comments import NAME_STYLE_MAP, lex_line, placements_for
-from apycite.grammar import KEYS, MARKER, Cite, CiteError, parse, render
+from apycite.grammar import KEYS, MARKER, Cite, CiteError, is_near_miss, parse, render
 from apycite.scan import Report, scan_file
 
 STYLES = sorted(NAME_STYLE_MAP.values(), key=lambda s: s.SHORTHAND)
@@ -287,3 +287,34 @@ def test_the_marker_is_not_a_regex_accident():
     """Guard the one assumption every skip in this tool leans on."""
     assert MARKER.pattern == r"(?<![A-Za-z0-9_])cite\s*\("
     assert re.compile(MARKER.pattern)
+
+
+# ── P3b: the substring theorem, which licenses skipping the lexer ───────
+
+@pytest.mark.parametrize(("cite", "style", "placement"), CASES, ids=IDS)
+def test_every_cite_contains_the_bare_word(cite, style, placement):
+    """A stronger, cheaper claim than the marker: every cite contains ``cite``.
+
+    ``scan`` skips the lexer for a file in which the substring never appears.
+    That is a bigger skip than the marker licenses, because it must also cover
+    the near-misses — text that announces itself as a citation and then fails to
+    parse (``is_near_miss`` matches ``cite\\b``, with no paren). Those are errors
+    the report must keep making, and ``MARKER`` does not see them.
+
+    So the guard is the union, and this is what says the union is exactly
+    ``"cite" in text``: both alternations of ``is_near_miss`` and the whole of
+    ``MARKER`` begin with those four characters.
+    """
+    rendered = comments.render(style, render(cite), placement)
+    assert "cite" in rendered
+
+
+def test_the_substring_probe_covers_the_near_misses_the_marker_misses():
+    """The gap the substring closes, stated as the two facts that make it real."""
+    prose = "cite this properly please"
+    assert not MARKER.search(prose)      # the marker does not see it
+    assert is_near_miss(prose)           # but the scanner must still report it
+    assert "cite" in prose               # and the substring does see it
+
+    # And it stays selective: the point is to skip most files, not all of them.
+    assert "cite" not in "fn main() { let x = 1; }"

@@ -112,12 +112,20 @@ class Cite:
         return (self.source, self.quote, tuple(sorted(self.targeting.items())))
 
 
+#: A payload that *announces itself* as a citation. Looser than `MARKER` on
+#: purpose: `cite` followed by a word boundary counts, with no paren, so a
+#: half-written citation is an error rather than a comment that reads oddly.
+#: `scan.PROBE` has to cover this alternation as well as `MARKER`, which is why
+#: it is the bare substring and not `cite(`.
+NEAR_MISS = re.compile(r"cite\b|cite\s*\(")
+
+
 def is_near_miss(payload: str) -> bool:
     """Does this payload announce itself as a cite?
 
     Anything that does so and then fails to parse is an error, not a comment.
     """
-    return re.match(r"cite\b|cite\s*\(", payload.strip()) is not None
+    return NEAR_MISS.match(payload.strip()) is not None
 
 
 def quote_is_closed(text: str) -> bool:

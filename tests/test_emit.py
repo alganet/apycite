@@ -449,3 +449,28 @@ def test_the_turtle_conforms_to_apysources_shapes():
         f"Install apysource[shacl]."
     )
     assert ok is True, report
+
+
+def test_the_c_and_python_yaml_emitters_agree_byte_for_byte():
+    """`--frozen` compares bytes, so the two dumpers must not disagree.
+
+    apycite writes YAML through libyaml when pyyaml was built with it, and
+    through the pure-Python emitter when it was not. Those are different
+    implementations, and whether a given machine has the C extension is not
+    something anyone declares — so if they ever formatted a document even
+    slightly differently, `extract --frozen` would pass in CI and fail on a
+    contributor's laptop, over a file neither of them had touched.
+
+    Skipped rather than silently passing where libyaml is absent: there is only
+    something to compare when there are two implementations present.
+    """
+    yaml = pytest.importorskip("yaml")
+    c_dumper = getattr(yaml, "CSafeDumper", None)
+    if c_dumper is None:
+        pytest.skip("pyyaml was built without libyaml; there is only one emitter")
+
+    document = _doc(BASE)
+    kwargs = dict(sort_keys=False, allow_unicode=True, width=10_000)
+
+    assert (yaml.dump(document, Dumper=c_dumper, **kwargs)
+            == yaml.dump(document, Dumper=yaml.SafeDumper, **kwargs))

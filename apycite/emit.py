@@ -21,6 +21,20 @@ from collections import defaultdict
 from typing import Any
 
 import yaml
+
+# libyaml where it is built, the pure-Python parser where it is not. The C
+# emitter is ~3x faster on a large citations file and produces byte-identical
+# output, which is the only reason it is safe to use here: `extract --frozen`
+# compares the committed file byte for byte, so a dumper that formatted even
+# slightly differently would report a phantom diff on machines that have
+# libyaml and not on those that do not. `test_emit` pins that equivalence.
+try:
+    from yaml import CSafeDumper as SafeDumper
+    from yaml import CSafeLoader as SafeLoader
+except ImportError:  # pragma: no cover - depends on how pyyaml was built
+    # SafeLoader is re-exported, not used here: `verify` reads back what this
+    # module writes, and the two have to be the same pair of implementations.
+    from yaml import SafeDumper, SafeLoader  # noqa: F401  # type: ignore[assignment]
 from apysource.sources import SourceSet
 from apysource.emit import UnknownFormat, serialize
 from apysource.yaml_input import graph_from_data
@@ -192,8 +206,8 @@ def render(document: dict[str, Any], fmt: str = "yaml") -> str:
         ) from None
 
     if fmt == "yaml":
-        return str(yaml.safe_dump(document, sort_keys=False, allow_unicode=True,
-                                  width=10_000))
+        return str(yaml.dump(document, Dumper=SafeDumper, sort_keys=False,
+                             allow_unicode=True, width=10_000))
 
     try:
         return serialize(graph, fmt)

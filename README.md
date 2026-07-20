@@ -273,9 +273,24 @@ written in. Every other file must be *read*:
 | a binary file | skipped, **and counted in the report** |
 | an excluded path | skipped, **and the glob is printed every run** |
 
-`sum(buckets) == files walked` is a test. And extracting **zero** cites is not a
+`sum(buckets) == paths walked` is a test. And extracting **zero** cites is not a
 pass — a validator that validated nothing has not passed. Pass `--allow-empty` if
 a tree with no cites is genuinely what you meant.
+
+*Paths*, not files, because of one case: a glob that excludes everything under a
+directory (`**/.git/**`, `vendor/*`) is answered by not entering it, and the
+directory is what gets counted. Walking a `.git` with a hundred thousand loose
+objects only to discard them one at a time was the largest cost in a scan of a
+real repository — and having not looked inside, apycite will not claim a count
+for what is there.
+
+A file whose text does not contain the four characters `cite` is read, counted as
+scanned, and not parsed further. That is licensed by a slightly stronger claim
+than the marker theorem: every citation contains `cite(`, and every *complaint*
+about a citation — including `// cite this properly please`, which announces
+itself and then fails to parse — contains at least `cite`. Skipping on the
+narrower `cite(` would have silenced that error, which is the failure this whole
+section exists to forbid.
 
 ## The ratchet
 

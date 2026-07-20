@@ -16,7 +16,7 @@ import pytest
 
 from apycite.comments import NAME_STYLE_MAP
 from apycite.config import DEFAULT_EXCLUDE
-from apycite.scan import Report, scan, scan_file
+from apycite.scan import Report, _excluded, scan, scan_file
 
 
 def _tree(tmp_path: Path, files: dict[str, str]) -> Path:
@@ -78,9 +78,83 @@ def test_the_shipped_defaults_exclude_a_top_level_directory(tmp_path):
     }, exclude=list(DEFAULT_EXCLUDE))
 
     assert len(report.parsed) == 1                       # a.rs, and nothing else
-    assert len(report.excluded) == 4                     # incl. the git object
     assert not report.errors                             # nothing unreadable survived
     assert len(report.cites) == 1                        # not 4 — the tree has one cite
+
+    # By name, not by count. Counting alone cannot tell "the four files under
+    # those directories" from "the four directories themselves" — both are 4 —
+    # so a bare `== 4` would go on passing straight through a change to what
+    # `excluded` means, which is exactly the change being made here.
+    assert {str(p.relative_to(tmp_path)) for p in report.excluded} == {
+        ".git", "target", "node_modules", "nested/target",
+    }
+    assert not any(p.name == "build.rs" for p in report.excluded), (
+        "an excluded directory is reported as itself, not enumerated file by file"
+    )
+
+
+def test_pruning_scans_exactly_what_testing_every_file_would_have(tmp_path):
+    """The soundness condition for not descending into a directory.
+
+    Pruning is only safe if a directory it skips contains nothing that the
+    per-file rule would have scanned. Rather than trust the derivation, check it:
+    walk the tree independently, apply `_excluded` to every file the old way, and
+    assert the two sets of *scanned* files agree exactly.
+
+    `excluded` itself is deliberately not compared — it now counts the pruned
+    directory rather than the files beneath it, which is the whole change.
+    """
+    report = _scan(tmp_path, {
+        "a.rs": CITE,
+        "docs/note.md": "# nothing",
+        "vendor/d.rs": CITE,
+        "vendor/deep/nested/e.rs": CITE,
+        "target/debug/build.rs": CITE,
+        "keep/target.rs": "// not a directory named target",
+    }, exclude=["vendor/*", "**/target/**", "*.md"])
+
+    scanned = {p for p in report.parsed} | {p for p in report.no_style}
+
+    expected = {
+        path for path in tmp_path.rglob("*")
+        if path.is_file() and not _excluded(str(path.relative_to(tmp_path)),
+                                            ["vendor/*", "**/target/**", "*.md"])
+    }
+    assert scanned == expected
+
+    # And the one that looks like a directory but is not:
+    assert any(p.name == "target.rs" for p in scanned)
+
+
+def test_a_glob_that_is_not_a_whole_directory_still_goes_file_by_file(tmp_path):
+    """`*.md` excludes files, names no directory, and must prune nothing."""
+    report = _scan(tmp_path, {
+        "a.rs": CITE,
+        "docs/one.md": "# one",
+        "docs/two.md": "# two",
+        "docs/keep.rs": CITE,
+    }, exclude=["*.md"])
+
+    assert {p.name for p in report.excluded} == {"one.md", "two.md"}
+    assert {p.name for p in report.parsed} == {"a.rs", "keep.rs"}
+
+
+def test_a_scan_root_below_the_project_still_reports_paths_from_the_root(tmp_path):
+    """`cited_by` is relative to the project, not to the directory scanned.
+
+    The walk carries the relative path down with it rather than recovering it
+    afterwards, so the place that prefix is seeded is the place this could go
+    wrong — and a cite site naming `rules/a.rs` instead of `src/rules/a.rs`
+    points a reviewer at a file that does not exist.
+    """
+    _tree(tmp_path, {
+        "src/rules/a.rs": CITE,
+        "src/vendor/v.rs": CITE,
+    })
+    report = scan(tmp_path, ["src"], ["src/vendor/*"])
+
+    assert [f.site.file for f in report.cites] == ["src/rules/a.rs"]
+    assert [str(p.relative_to(tmp_path)) for p in report.excluded] == ["src/vendor"]
 
 
 def test_a_binary_file_is_skipped_and_counted(tmp_path):
@@ -130,6 +204,48 @@ def test_an_unstyled_file_with_no_marker_is_a_safe_skip(tmp_path):
 
     assert not report.errors
     assert len(report.no_style) == 1
+
+
+# ── What licenses skipping a file's lexer ───────────────────────────────
+
+@pytest.mark.parametrize("prose", [
+    "// cite this properly please",
+    "// cite: see RFC 9110 for the rule",
+    "# cite the spec here",
+])
+def test_cite_shaped_prose_without_the_marker_is_still_reported(tmp_path, prose):
+    """A near-miss need not contain ``cite(`` — and must not go quiet.
+
+    ``is_near_miss`` (grammar.py) matches ``cite\\b`` *or* ``cite\\s*\\(``, so a
+    payload opening with the bare word announces itself as a citation, fails to
+    parse, and is an error. ``MARKER`` does not match any of these.
+
+    That is the trap in the obvious optimisation. Skipping a file because it has
+    no ``cite(`` would turn every one of these reported errors into silence —
+    a dropped diagnostic, which is the precise failure the scanner exists to
+    forbid. Whatever probe guards the lexer must be a superset of *both*
+    ``MARKER`` and ``is_near_miss``, and the bare substring ``cite`` is the
+    cheapest thing that is.
+    """
+    ext = ".py" if prose.startswith("#") else ".rs"
+    report = _scan(tmp_path, {f"a{ext}": prose})
+
+    assert report.errors, "cite-shaped prose was silently dropped"
+    assert "expected 'cite('" in report.errors[0]
+
+
+def test_a_file_with_no_occurrence_of_cite_at_all_reports_nothing(tmp_path):
+    """The other side of it: no ``cite`` anywhere means nothing to say.
+
+    This is the population the probe exists to skip, and it must still land in
+    ``parsed`` — "we read it and it was clean", not "we did not look".
+    """
+    report = _scan(tmp_path, {"a.rs": "fn main() { let x = 1; }\n// ordinary\n"})
+
+    assert not report.errors
+    assert not report.warnings
+    assert not report.cites
+    assert [p.name for p in report.parsed] == ["a.rs"]
 
 
 def test_a_file_that_is_not_utf8_is_an_error_not_a_skip(tmp_path):
