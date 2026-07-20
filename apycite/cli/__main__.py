@@ -15,6 +15,7 @@ from apycite.cli import commands
 USAGE = """Usage: apycite [-c apycite.toml] <command> [flags]
 
   extract [--frozen] [--allow-empty]   scan the tree and write the citations file
+          [--format yaml|turtle]
   verify  [--refresh] [--format json]  check every quote against its source
           [--strict-redirects] [--strict-repos]
   ratchet [--init] [--write]           enforce the migration baseline
@@ -26,6 +27,11 @@ A cite is a comment:
 
 `extract` writes an apysource sources file; `apysource check` verifies it.
 `verify` does both in one pass.
+
+`--format turtle` writes the same citations as RDF instead — the map from your
+code to the sentences it implements, publishable and mergeable if the sources
+file sets a `base:`. It is the only RDF form that is byte-stable, so it is the
+only one `--frozen` can compare.
 """
 
 
@@ -79,7 +85,14 @@ def main(argv: list[str] | None = None) -> int:
         if name == "extract":
             frozen, args = _flag(args, "--frozen")
             allow_empty, args = _flag(args, "--allow-empty")
-            return commands.extract(config, frozen=frozen, allow_empty=allow_empty)
+            fmt, args = _value(args, "--format")
+            if fmt is not None and fmt not in config_module.OUTPUT_FORMATS:
+                known = ", ".join(sorted(config_module.OUTPUT_FORMATS))
+                print(f"error: unknown --format {fmt!r} (known: {known})",
+                      file=sys.stderr)
+                return 2
+            return commands.extract(config, frozen=frozen,
+                                    allow_empty=allow_empty, fmt=fmt)
 
         if name == "verify":
             refresh, args = _flag(args, "--refresh")

@@ -187,11 +187,12 @@ not evidence. A reviewer sees the URL that was fetched.
 ## Commands
 
 ```bash
-apycite extract              # scan the tree, write the citations file
-apycite extract --frozen     # ...or fail if the committed one is out of date
-apycite verify               # check every quote against the source that says it
-apycite ratchet              # enforce the migration baseline
-apycite styles --path x.zig  # which comment style a file gets, and why
+apycite extract                   # scan the tree, write the citations file
+apycite extract --frozen          # ...or fail if the committed one is out of date
+apycite extract --format turtle   # ...as RDF instead of YAML
+apycite verify                    # check every quote against the source that says it
+apycite ratchet                   # enforce the migration baseline
+apycite styles --path x.zig       # which comment style a file gets, and why
 ```
 
 There is no `apycite check`. That word is `apysource check`'s, and a CI log must
@@ -205,6 +206,44 @@ for every pull request; `verify` fetches, so it runs nightly:
 - run: apycite ratchet                 # no new rule without a citation
 - run: apysource check specs.yaml      # (or: apycite verify, nightly)
 ```
+
+## Publishing the citations as RDF
+
+The citations file *is* a graph — apycite has always parsed its own output into
+one before writing it, as a guard. `--format turtle` keeps that graph instead of
+throwing it away:
+
+```toml
+[apycite]
+output        = "citations.ttl"
+output_format = "turtle"
+sources       = "sources.yaml"
+```
+
+What comes out is the map from your code to the sentences it implements: an
+`sv:CiteSite` carrying the file and line, `prov:wasDerivedFrom` the fragment,
+`oa:hasSource` the document. Someone else can then ask which projects depend on
+RFC 9110 § 7.2 and get an answer.
+
+For that to be true across projects, the identifiers have to be yours. Set a
+`base:` in the **sources** file — it is apysource's key, in apysource's file, and
+apycite carries it into what it writes:
+
+```yaml
+base: https://example.org/citations
+sources:
+  - label: RFC 9110
+```
+
+Without one, identifiers fall back to `urn:apysource:fragment_<label>`, which is
+derived from the label and so identical to what every other project citing that
+sentence would mint. Fine while the file stays with you; a silent merge of two
+different citations the moment it does not.
+
+Turtle is the only RDF form `--frozen` can compare, and that is why it is the
+only one offered: the rest label their blank nodes afresh on every run, so a
+committed file would show a diff on every commit and everyone would learn to
+ignore the check.
 
 ## Nothing goes unlooked-at
 

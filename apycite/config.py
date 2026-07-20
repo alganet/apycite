@@ -33,8 +33,17 @@ DEFAULT_EXCLUDE = [
     "**/.venv/**", "**/dist/**", "**/build/**",
 ]
 
+#: What `output_format` may say.
+#:
+#: `yaml` is apycite's own; the rest are apysource's serializations, and they are
+#: named here rather than taken from `apysource.emit.FORMATS` wholesale because
+#: only some of them can be committed. `--frozen` compares bytes, and a format
+#: that labels its blank nodes afresh each run would report a diff every commit
+#: and teach everyone to ignore it.
+OUTPUT_FORMATS = ("yaml", "turtle", "ttl")
+
 _TOP_KEYS = {"apycite", "styles", "labels", "ratchet"}
-_APYCITE_KEYS = {"roots", "exclude", "sources", "output",
+_APYCITE_KEYS = {"roots", "exclude", "sources", "output", "output_format",
                  "marker_outside_comments"}
 _LABEL_KEYS = {"match", "label"}
 _RATCHET_KEYS = {"scope", "baseline", "exclude"}
@@ -92,6 +101,14 @@ class Config:
     exclude: list[str] = field(default_factory=lambda: list(DEFAULT_EXCLUDE))
     sources: str | None = None
     output: str = "specs.yaml"
+    #: How the citations file is written. ``yaml`` is the file a person reads and
+    #: reviews; ``turtle`` is the same citations as RDF, for a project that wants
+    #: to publish the map from its code to the sentences it implements.
+    #:
+    #: Only turtle among the RDF serializations is byte-stable, and `extract
+    #: --frozen` compares bytes — the others label their blank nodes afresh each
+    #: run, so a committed file would show a diff on every commit.
+    output_format: str = "yaml"
     marker_outside_comments: str = "error"
     styles: dict[str, type[CommentStyle]] = field(default_factory=dict)
     labels: list[LabelRule] = field(default_factory=list)
@@ -152,6 +169,14 @@ def load(path: Path | None, root: Path) -> Config:
     config.exclude = main.get("exclude", config.exclude)
     config.sources = main.get("sources")
     config.output = main.get("output", config.output)
+    config.output_format = main.get("output_format", config.output_format)
+    if config.output_format not in OUTPUT_FORMATS:
+        known = ", ".join(sorted(OUTPUT_FORMATS))
+        raise ConfigError(
+            f"unknown output_format {config.output_format!r}. Known: {known}. "
+            f"Only 'yaml' and 'turtle' can be committed and compared by "
+            f"`extract --frozen`; the rest relabel their blank nodes each run.",
+        )
     config.marker_outside_comments = main.get("marker_outside_comments", "error")
 
     if config.marker_outside_comments not in ("error", "warn"):

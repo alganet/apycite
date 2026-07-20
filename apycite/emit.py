@@ -22,6 +22,7 @@ from typing import Any
 
 import yaml
 from apysource.sources import SourceSet
+from apysource.emit import UnknownFormat, serialize
 from apysource.yaml_input import graph_from_data
 
 from apycite.config import LabelRule
@@ -151,13 +152,36 @@ def build(
         source["fragments"] = fragments[label]
         out.append(source)
 
-    return {"sources": out}
+    document: dict[str, Any] = {"sources": out}
+
+    # The sources file's `base:` names the identifiers apysource mints from this
+    # data. Dropping it here dropped it exactly where it counts: *this* is the
+    # file that gets verified and emitted as RDF, so an author who asked for
+    # identifiers under a name they control silently got `urn:apysource:` back —
+    # the form that collides with every other project citing the same sentence.
+    #
+    # It stays apysource's key in apysource's file. apycite carries it; it does
+    # not own it.
+    if sources.base:
+        document = {"base": sources.base, **document}
+
+    return document
 
 
-def render(document: dict[str, Any]) -> str:
-    """The YAML, deterministically — and only after apysource has accepted it."""
+def render(document: dict[str, Any], fmt: str = "yaml") -> str:
+    """The document as text — and only after apysource has accepted it.
+
+    The graph built here is not a side effect of checking; for any `fmt` other
+    than ``yaml`` it *is* the output. apycite has always parsed its own result
+    into an rdflib graph before writing, as a guard against emitting a file
+    `apysource check` would reject, and then thrown that graph away. The RDF lane
+    is the same guard, kept.
+
+    Serializing is apysource's, deliberately: what apysource RDF looks like is
+    apysource's business, and a second answer here is one that drifts.
+    """
     try:
-        graph_from_data(document, origin="(apycite output)")
+        graph = graph_from_data(document, origin="(apycite output)")
     except ValueError as exc:
         # If this fires, apycite has generated a file `apysource check` would
         # reject. The author cannot fix it — apycite must. Say so plainly rather
@@ -167,5 +191,11 @@ def render(document: dict[str, Any]) -> str:
             f"This is a bug in apycite, not in your cites.",
         ) from None
 
-    return str(yaml.safe_dump(document, sort_keys=False, allow_unicode=True,
-                              width=10_000))
+    if fmt == "yaml":
+        return str(yaml.safe_dump(document, sort_keys=False, allow_unicode=True,
+                                  width=10_000))
+
+    try:
+        return serialize(graph, fmt)
+    except UnknownFormat as exc:
+        raise EmitError(str(exc)) from None

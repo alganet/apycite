@@ -97,3 +97,27 @@ def test_the_config_is_found_by_walking_up(tmp_path):
 
 def test_no_config_anywhere_is_not_an_error(tmp_path):
     assert find(tmp_path) is None
+
+
+# ── output_format ────────────────────────────────────────────────────────
+
+def test_output_format_defaults_to_yaml(tmp_path):
+    assert load(_write(tmp_path, '[apycite]\nroots = ["."]\n'),
+                tmp_path).output_format == "yaml"
+
+
+def test_output_format_turtle(tmp_path):
+    assert load(_write(tmp_path, '[apycite]\noutput_format = "turtle"\n'),
+                tmp_path).output_format == "turtle"
+
+
+def test_an_output_format_nobody_knows_is_refused(tmp_path):
+    """Only the formats that can be committed.
+
+    `extract --frozen` compares bytes, and every RDF serialization except turtle
+    labels its blank nodes afresh each run — a committed file would report a diff
+    on every commit, which teaches everyone to ignore the check.
+    """
+    path = _write(tmp_path, '[apycite]\noutput_format = "json-ld"\n')
+    with pytest.raises(ConfigError, match="unknown output_format"):
+        load(path, tmp_path)

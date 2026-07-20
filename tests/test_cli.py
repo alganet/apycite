@@ -320,3 +320,36 @@ def test_a_flag_without_its_value_is_refused(project):
 
 def test_a_missing_config_is_refused(project):
     assert main(["-c", "nope.toml", "extract"]) == 2
+
+
+# ── extract --format ────────────────────────────────────────────────────
+
+def test_extract_format_turtle_writes_rdf(project):
+    """The same citations, as the graph apycite already built to check itself."""
+    from rdflib import Graph
+
+    _rule(project, "host", CITE)
+    assert main(["extract", "--format", "turtle"]) == 0
+
+    out = (project / "specs.yaml").read_text(encoding="utf-8")
+    assert Graph().parse(data=out, format="turtle")
+
+
+def test_extract_refuses_a_format_nobody_knows(project, capsys):
+    """Only what can be committed.
+
+    `--frozen` compares bytes, and every RDF serialization but turtle relabels
+    its blank nodes each run — a committed file would show a diff on every
+    commit, and a check that cries wolf is one everybody learns to skip.
+    """
+    _rule(project, "host", CITE)
+    assert main(["extract", "--format", "json-ld"]) == 2
+    assert "unknown --format" in capsys.readouterr().err
+
+
+def test_extract_frozen_is_stable_for_turtle(project):
+    """Two runs, no diff. This is what deterministic blank-node labels buy."""
+    _rule(project, "host", CITE)
+    assert main(["extract", "--format", "turtle"]) == 0
+    assert main(["extract", "--format", "turtle", "--frozen"]) == 0
+    assert main(["extract", "--format", "turtle", "--frozen"]) == 0

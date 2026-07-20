@@ -27,7 +27,7 @@ from apycite.scan import Found, Site
 RULES = [LabelRule("src/rules/*.rs", "{stem}"), LabelRule("**/*", "{path}")]
 
 
-def _sources(entries=None, patterns=None):
+def _sources(entries=None, patterns=None, base=None):
     """A sources file, through apysource's *real* loader.
 
     Never a hand-rolled fake. What a source entry may say is apysource's to
@@ -38,6 +38,8 @@ def _sources(entries=None, patterns=None):
     data = {"sources": list(entries or [])}
     if patterns:
         data["patterns"] = patterns
+    if base:
+        data["base"] = base
     return sources_from_data(data, "(test)")
 
 
@@ -299,7 +301,8 @@ def test_a_named_entry_is_written_out_expanded():
     """
     doc = build(_found(("RFC 9110", "a generated quote", {}, "a.rs", 1)), _sources([
         {"label": "RFC 9110",
-         "fragments": [{"label": "by hand", "lines": "10-12"}]},
+         "fragments": [{"label": "by hand", "lines": "10-12",
+                        "snippet": "a hand-written quote"}]},
     ]), RULES)
     source = doc["sources"][0]
 
@@ -338,3 +341,111 @@ def test_the_same_cites_render_the_same_bytes():
     # order" is still a diff someone has to read and dismiss.
     assert first == second
     assert yaml.safe_load(first)["sources"]
+
+
+# ── base: survives the round trip ────────────────────────────────────────
+
+BASE = "https://lint-http.example/citations"
+
+
+def test_the_sources_files_base_reaches_the_generated_file():
+    """`base:` names the identifiers apysource mints from this data.
+
+    Dropping it dropped it exactly where it counts: the *generated* file is the
+    one that gets verified and emitted as RDF, so an author who asked for
+    identifiers under a name they control silently got `urn:apysource:` back —
+    the form that collides with every other project citing the same sentence.
+    """
+    doc = build(_found(("RFC 9110", "a quote", {}, "a.rs", 1)),
+                _sources(base=BASE), RULES)
+    assert doc["base"] == BASE
+
+
+def test_no_base_means_no_base_key():
+    """A file that did not ask for one gets no key it did not write."""
+    doc = build(_found(("RFC 9110", "a quote", {}, "a.rs", 1)), _sources(), RULES)
+    assert "base" not in doc
+
+
+def test_the_base_mints_the_identifiers():
+    """The point of carrying it: what the graph is actually called."""
+    from rdflib import RDF
+
+    doc = build(_found(("RFC 9110", "a quote", {}, "a.rs", 1)),
+                _sources(base=BASE), RULES)
+    graph = graph_from_data(doc)
+    assert all(str(s).startswith(BASE)
+               for s in graph.subjects(RDF.type, SV.Fragment))
+
+
+# ── The RDF lane ─────────────────────────────────────────────────────────
+
+def _doc(base=None):
+    return build(
+        _found(("RFC 9110", "a quote that is long enough", {"section": "§ 7.2"},
+                "src/rules/host.rs", 1),
+               ("RFC 9110", "another quote entirely", {"section": "§ 9.1"},
+                "src/rules/method.rs", 1)),
+        _sources(base=base), RULES)
+
+
+def test_render_turtle_is_parseable_rdf():
+    from rdflib import Graph
+
+    out = render(_doc(BASE), "turtle")
+    graph = Graph().parse(data=out, format="turtle")
+    assert len(graph) > 0
+
+
+def test_render_turtle_says_the_same_thing_as_the_yaml():
+    """One document, two renderings. They cannot disagree."""
+    from rdflib import Graph
+    from rdflib.compare import isomorphic
+
+    doc = _doc(BASE)
+    from_turtle = Graph().parse(data=render(doc, "turtle"), format="turtle")
+    assert isomorphic(graph_from_data(doc), from_turtle)
+
+
+def test_render_turtle_is_byte_stable():
+    """`extract --frozen` compares bytes.
+
+    Blank-node labels used to be fresh uuids, and rdflib orders the objects of a
+    predicate by them — so a fragment carrying both a section and a quote
+    selector emitted them in a different order each run. A committed turtle file
+    would have shown a diff on every commit, which teaches everyone to ignore
+    the check. apysource 0.6.0 mints the labels deterministically; this is what
+    depends on it.
+    """
+    assert render(_doc(BASE), "turtle") == render(_doc(BASE), "turtle")
+
+
+def test_render_defaults_to_yaml():
+    assert render(_doc(), "yaml").lstrip().startswith(("sources:", "base:"))
+
+
+def test_render_refuses_a_format_nobody_knows():
+    with pytest.raises(EmitError, match="unknown format"):
+        render(_doc(), "yodel")
+
+
+def test_the_turtle_conforms_to_apysources_shapes():
+    """apycite must not emit RDF apysource's own validator would reject.
+
+    `conforms` has three answers, not two: passed, failed, and could not look —
+    the last when pyshacl is absent, since it is an optional extra of apysource.
+    That third answer is asserted separately and first, because a suite reporting
+    green over a check that never ran is the exact failure both these tools were
+    built to abolish. `apysource[shacl]` is in apycite's dev extras so it runs.
+    """
+    from apysource.shapes import conforms
+    from rdflib import Graph
+
+    graph = Graph().parse(data=render(_doc(BASE), "turtle"), format="turtle")
+    ok, report = conforms(graph)
+
+    assert ok is not None, (
+        f"the shapes did not run, so this test proved nothing: {report}. "
+        f"Install apysource[shacl]."
+    )
+    assert ok is True, report

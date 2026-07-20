@@ -42,7 +42,7 @@ def _complain(report: Report) -> int:
     return 1 if report.errors else 0
 
 
-def _document(config: Config, report: Report) -> str:
+def _document(config: Config, report: Report, fmt: str | None = None) -> str:
     path = config.root / config.sources if config.sources else None
 
     # The existence check stays on this side of the line. It is *our* config that
@@ -51,11 +51,12 @@ def _document(config: Config, report: Report) -> str:
     if path is not None and not path.exists():
         raise emit.EmitError(f"sources file not found: {path}")
 
-    return emit.render(emit.build(report.cites, load_sources(path), config.labels))
+    return emit.render(emit.build(report.cites, load_sources(path), config.labels),
+                       fmt or config.output_format)
 
 
 def extract(config: Config, *, frozen: bool = False,
-            allow_empty: bool = False) -> int:
+            allow_empty: bool = False, fmt: str | None = None) -> int:
     """Scan, resolve, and write the citations file."""
     report = _scan(config)
 
@@ -79,7 +80,7 @@ def extract(config: Config, *, frozen: bool = False,
         return 1
 
     try:
-        rendered = _document(config, report)
+        rendered = _document(config, report, fmt)
     except Exception as exc:                    # noqa: BLE001 — reported, not raised
         print(f"error: {exc}", file=sys.stderr)
         return 1

@@ -57,6 +57,12 @@ dev = [
     "slipcover>=1.0",
     "mypy>=1.0",
     "ruff>=0.6",
+    # apycite emits RDF now, and whether that RDF satisfies apysource's own SHACL
+    # shapes is a thing the test suite must *check*, not skip. pyshacl is optional
+    # for apysource — `conforms` returns "did not run" without it — so a suite that
+    # merely imports it would go green having validated nothing, which is the
+    # failure both these tools exist to abolish.
+    "apysource[shacl]>=0.5.2",
 ]
 
 [tool.setuptools.dynamic]
