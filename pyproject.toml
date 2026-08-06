@@ -59,8 +59,15 @@ classifiers = [
 # locate answers document-scoped instead of "not found" when only the document pins
 # the quote. A cite this tool helps write is only as good as apysource's ability to
 # find it again, so the two keep moving together.
+#
+# The floor is 0.8.1, not 0.8.0, and the difference is a lost quote rather than a
+# missing feature: 0.8.0's new section walk skipped any content element wrapping a
+# heading, and the HTML standard's unclosed `<p>` elements make that one `<p>` holding
+# two headings and 7577 characters. Under 0.8.0 a section-scoped cite into that text
+# extracts nothing and fails; under 0.7.0 and 0.8.1 it verifies. A floor exists for
+# exactly the release that can refuse a citation this tool wrote.
 dependencies = [
-    "apysource>=0.8.0",
+    "apysource>=0.8.1",
     "pyyaml>=6.0",
 ]
 
