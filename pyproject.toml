@@ -50,8 +50,17 @@ classifiers = [
 # documents, so `extract --frozen` on a turtle file would have reported a diff
 # on every commit. The turtle lane is not merely nicer on 0.6.0; it is wrong
 # before it.
+#
+# 0.8.0 raises it for the same reason 0.5.2 did: it is where apysource learned to
+# read the documents apycite's citations are written against. A section now owns
+# its <pre> — the grammar block of every W3C and WHATWG source — so a section-scoped
+# cite into one verifies on 0.8.0 and fails on anything older; an htmlized RFC
+# rendition is read as HTML rather than as RFC text with the markup left in; and
+# locate answers document-scoped instead of "not found" when only the document pins
+# the quote. A cite this tool helps write is only as good as apysource's ability to
+# find it again, so the two keep moving together.
 dependencies = [
-    "apysource>=0.6.0",
+    "apysource>=0.8.0",
     "pyyaml>=6.0",
 ]
 
