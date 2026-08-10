@@ -237,7 +237,12 @@ def test_every_targetting_key_apysource_knows_can_be_emitted():
 # ── The sources file ────────────────────────────────────────────────────
 
 def test_an_entry_wins_over_a_pattern():
-    """So a project can pin one RFC to datatracker, or to the HTML rendition."""
+    """So a project can pin one RFC to a mirror, or to the text rendition.
+
+    The URL wins outright, repo or no repo. Here it is datatracker, which the RFC
+    repo also claims — the entry decides *which document*, and the repo then
+    decides how to read whatever that turns out to be.
+    """
     doc = build(_found(("RFC 9110", "q", {}, "a.rs", 1)), _sources([
         {"label": "RFC 9110", "url": "https://datatracker.ietf.org/doc/html/rfc9110",
          "type": "text/html"},
@@ -279,13 +284,20 @@ def test_an_unknown_source_names_the_file_and_line():
 
 
 def test_a_pattern_mints_a_source_apysource_accepts():
-    """The pattern is apysource's now, and apycite never learns what an RFC is —
-    it asks, and writes down the answer."""
+    """The family is apysource's now, and apycite never learns what an RFC is —
+    it asks, and writes down the answer. It is a *repo* that declares it these
+    days, which apycite has still never heard of.
+
+    And no `type`. Which rendition answers for an RFC is the repo's decision, made
+    after this template has run, so a media type here would be apycite writing
+    down a claim nobody made. Asserted as an absence because that is the fact a
+    regression would quietly reintroduce.
+    """
     doc = build(_found(("RFC 9112", "q", {}, "a.rs", 1)), _sources(), RULES)
     source = doc["sources"][0]
 
-    assert source["url"] == "https://www.rfc-editor.org/rfc/rfc9112.txt"
-    assert source["type"] == "text/plain"
+    assert source["url"] == "https://www.rfc-editor.org/rfc/rfc9112.html"
+    assert "type" not in source
     graph_from_data(doc)
 
 
@@ -306,8 +318,8 @@ def test_a_named_entry_is_written_out_expanded():
     ]), RULES)
     source = doc["sources"][0]
 
-    assert source["url"] == "https://www.rfc-editor.org/rfc/rfc9110.txt"
-    assert source["type"] == "text/plain"
+    assert source["url"] == "https://www.rfc-editor.org/rfc/rfc9110.html"
+    assert "type" not in source
     assert [f["label"] for f in source["fragments"]] == ["by hand", "a.rs"]
     graph_from_data(doc)          # the guard: no patterns block, and it still loads
 

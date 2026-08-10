@@ -56,7 +56,8 @@ def _rule(project: Path, name: str, body: str = "") -> Path:
 
 def test_extract_writes_a_file_apysource_can_read(project):
     """Note the config: no `sources` key at all. `RFC 9112` still resolves — the
-    pattern is apysource's, and it ships. apycite never learns what an RFC is.
+    family is apysource's, declared by the repo that fetches it, and it ships.
+    apycite never learns what an RFC is.
 
     And the url it writes is the *expanded* one. The generated file is evidence,
     and a reviewer opening it must see the URL that was actually fetched, not a
@@ -68,7 +69,7 @@ def test_extract_writes_a_file_apysource_can_read(project):
 
     doc = yaml.safe_load((project / "specs.yaml").read_text())
     assert doc["sources"][0]["label"] == "RFC 9112"
-    assert doc["sources"][0]["url"] == "https://www.rfc-editor.org/rfc/rfc9112.txt"
+    assert doc["sources"][0]["url"] == "https://www.rfc-editor.org/rfc/rfc9112.html"
     fragment = doc["sources"][0]["fragments"][0]
     assert fragment["label"] == "host"
     assert fragment["section"] == "§ 3.2"

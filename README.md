@@ -23,7 +23,7 @@ When the spec moves under you, you find out — and you find out *where*:
 
 ```
   [FAIL] Fragments: snippet verified............. 2/3
-         RFC 9112 (https://www.rfc-editor.org/rfc/rfc9112.txt) (1)
+         RFC 9112 (https://www.rfc-editor.org/rfc/rfc9112.html) (1)
            client_host_header: snippet not found in extracted content
              closest match (94% similar, § 3.2)
                source says: A client MUST send a Host header field ... in all HTTP/1.1 request messages.
@@ -148,9 +148,7 @@ names an entry by its `label`:
 
 ```yaml
 sources:
-  - label: RFC 9110
-    url: https://www.rfc-editor.org/rfc/rfc9110.txt
-    type: text/plain
+  - label: RFC 9110                    # RfcRepo claims rfc-editor automatically
   - label: Fetch
     url: https://fetch.spec.whatwg.org/
     type: text/html
@@ -167,9 +165,10 @@ grammar deliberately cannot say (a selector-only fragment, a `part_of` chapter
 tree) cost you nothing.
 
 `RFC NNNN` resolves without an entry — not because apycite knows what an RFC is,
-but because **apysource ships the pattern**, next to the fetcher that has to know
-the URL anyway. Another family is a `patterns:` block in the same sources file,
-and it is apysource's key, not apycite's:
+but because **apysource ships a repository for rfc-editor** and that repository
+declares the name family beside the fetching it does anyway. A family apysource
+has no repo for is a `patterns:` block in the same sources file, and it is
+apysource's key, not apycite's:
 
 ```yaml
 patterns:
@@ -177,10 +176,11 @@ patterns:
     source: {url: "https://www.w3.org/TR/{slug}/", type: text/html}
 ```
 
-An entry beats a pattern, so pinning `RFC 9110` to datatracker is one entry.
+An entry beats both, so pinning `RFC 9110` to a mirror of your own is one entry.
 
-What apycite *writes* is the expanded source — full URL, full media type — even
-when the entry that produced it was a bare `- label: RFC 9110`. The generated file
+What apycite *writes* is the expanded source — the full URL, and whatever else
+apysource resolved — even when the entry that produced it was a bare
+`- label: RFC 9110`. The generated file
 is evidence, and evidence you have to hold a pattern table beside you to read is
 not evidence. A reviewer sees the URL that was fetched.
 

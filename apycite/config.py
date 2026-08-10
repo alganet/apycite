@@ -54,7 +54,9 @@ _RATCHET_KEYS = {"scope", "baseline", "exclude"}
 #: shipped a hardcoded rfc-editor link while its own README said it "has no idea
 #: what an RFC is, or where rfc-editor lives". Turning a name into a URL is the
 #: job of the tool that then fetches the URL, and it now is one: apysource ships
-#: the RFC pattern, and a `patterns:` block in the sources file adds a family.
+#: a repository that claims rfc-editor and declares the `RFC NNNN` name family
+#: alongside it, and a `patterns:` block in the sources file adds a family of
+#: your own.
 _SPECS_MOVED = (
     "[[specs]] moved to apysource. Turning a name like 'RFC 9110' into a URL is "
     "the job of the tool that fetches the URL — apycite has no idea what an RFC "
@@ -65,8 +67,9 @@ _SPECS_MOVED = (
     "      - match: '^W3C (?P<slug>[a-z0-9-]+)$'\n"
     "        source: {url: 'https://www.w3.org/TR/{slug}/', type: text/html}\n"
     "\n"
-    "'RFC NNNN' needs no pattern at all — apysource ships it. What apycite writes "
-    "out is unchanged: the expanded URL, as before."
+    "'RFC NNNN' needs no pattern at all — apysource ships a repository that "
+    "claims rfc-editor and declares the family beside it. What apycite writes "
+    "out is the expanded URL, whichever one apysource resolves the name to."
 )
 
 

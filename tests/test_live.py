@@ -14,12 +14,19 @@ said. The rule that came out of it is written down, and this file is it:
 > what the tests mock, because that is where the bug is.**
 
 And a second rule, particular to this package: **a suite that only ever runs RFCs
-has never seen apycite work as a general tool.** So the tree below cites five
-sources, in four languages, across every path apysource has: the generic fetcher
-on plain text (an RFC), the generic fetcher on HTML (a living standard, and a
-treaty that is not a specification at all), and two repos that claim their URLs
-and fetch something else entirely (MDN's authored markdown; a novel from Project
+has never seen apycite work as a general tool.** So the tree below cites six
+sources, in five languages, across every path apysource has: the generic fetcher
+on HTML (a living standard, and a treaty that is not a specification at all), the
+generic fetcher on plain text (a licence — nobody's specification and nobody's
+repo), and three repos that claim their URLs and fetch something else entirely
+(rfc-editor's HTML rendition; MDN's authored markdown; a novel from Project
 Gutenberg).
+
+The RFC changed lanes in apysource 0.9.0 and is now one of the repos rather than
+the plain-text case, which is why the licence is here: without it the whole
+plain-text path — detection, and reading a document that has no structure to name
+— would have no live witness at all, and the suite would still have looked
+complete.
 
 Writing this file has now found bugs twice — three misquotations the first time,
 and E10 the second, where apysource insisted that Moby-Dick does not contain
@@ -36,7 +43,7 @@ pytestmark = pytest.mark.live
 
 SOURCES = """
 sources:
-  # No url. apysource ships the `RFC NNNN` pattern and mints one, and nothing in
+  # No url. apysource ships the `RFC NNNN` family and mints one, and nothing in
   # either project proves that url actually *fetches* unless something asks for
   # it against the live document. This is the something.
   - label: RFC 9112
@@ -56,6 +63,12 @@ sources:
     url: https://www.gutenberg.org/ebooks/2701
     publisher: Harper & Brothers
     date: "1851"
+
+  # Plain text, through the generic fetcher, claimed by no repo and named by no
+  # pattern. Frozen since 2007, which is what makes it quotable at all.
+  - label: GPL-3.0
+    url: https://www.gnu.org/licenses/gpl-3.0.txt
+    type: text/plain
 """
 
 CONFIG = """
@@ -78,7 +91,9 @@ label = "{path}"
 # short to be evidence — sixteen characters, which is a phrase, not a citation.
 # That is the tool doing its job on its own author, and the scar tissue stays.
 TREE = {
-    # Plain text, RFC section tree. The generic fetcher.
+    # An RFC, through RfcRepo, which fetches the HTML rendition and sections it
+    # by the `id="section-3.2"` the publisher wrote — not by the shape of a line
+    # in a 72-column text file, which is how this used to be read.
     "src/host.rs":
         '// cite(RFC 9112 § 3.2): "A client MUST send a Host header field '
         '(Section 7.2 of [HTTP]) in all HTTP/1.1 request messages."',
@@ -117,6 +132,14 @@ TREE = {
     "src/whale.lua":
         '-- cite(Moby-Dick): "Call me Ishmael. Some years ago—never mind how '
         'long precisely—having little or no money in my purse"',
+
+    # Plain text, document-scoped, in a fifth comment style. There is nothing to
+    # target: a licence has no headings a selector could name, and a line range
+    # into one is an address that means nothing to a reader. The quote spans a
+    # line wrap, which is the whole of what reading plain text amounts to.
+    "src/notice.tex":
+        '% cite(GPL-3.0): "we need to prevent others from denying you\n'
+        '% these rights or asking you to surrender the rights."',
 }
 
 
@@ -137,18 +160,19 @@ def _run(args, cwd):
                           cwd=cwd, capture_output=True, text=True, timeout=300)
 
 
-def test_extract_reads_five_sources_across_four_languages(project):
+def test_extract_reads_six_sources_across_five_languages(project):
     result = _run(["extract"], project)
     assert result.returncode == 0, result.stderr
 
     doc = (project / "specs.yaml").read_text()
-    for label in ("RFC 9112", "Fetch", "MDN Origin", "UN Charter", "Moby-Dick"):
+    for label in ("RFC 9112", "Fetch", "MDN Origin", "UN Charter", "Moby-Dick",
+                  "GPL-3.0"):
         assert label in doc, f"{label} did not survive extraction"
 
     # `RFC 9112` was written into sources.yaml as a bare name. What comes out
     # carries the url apysource minted for it — the generated file stands alone,
     # and a reviewer sees the document that was fetched.
-    assert "https://www.rfc-editor.org/rfc/rfc9112.txt" in doc
+    assert "https://www.rfc-editor.org/rfc/rfc9112.html" in doc
 
 
 def test_every_quote_is_really_in_the_source(project):
@@ -188,10 +212,12 @@ def test_a_drifted_quote_fails_and_names_the_line(project, tmp_path):
 
 
 def test_the_repo_backed_sources_really_go_through_their_repos(project):
-    """Two repos claim their URLs here, and `--strict-repos` fails if one could
+    """Three repos claim their URLs here, and `--strict-repos` fails if one could
     not serve what it claimed.
 
-    MdnRepo fetches `mdn/content` markdown rather than the rendered page, so a
+    RfcRepo is the newest of them and the reason this assertion moved: an RFC used
+    to reach the generic fetcher, where `--strict-repos` has nothing to say about
+    it. MdnRepo fetches `mdn/content` markdown rather than the rendered page, so a
     moved page 404s instead of quietly following a 301 to a page that says
     something else. GutenbergRepo assembles a book out of its chapters — and
     Moby-Dick is cited here with no targetter at all, which is the case that was
