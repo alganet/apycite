@@ -66,8 +66,26 @@ classifiers = [
 # two headings and 7577 characters. Under 0.8.0 a section-scoped cite into that text
 # extracts nothing and fails; under 0.7.0 and 0.8.1 it verifies. A floor exists for
 # exactly the release that can refuse a citation this tool wrote.
+#
+# 0.9.0 raises it for a different kind of reason, and it is worth naming the
+# difference. Every floor above was raised because a *quote became findable*: the
+# old apysource would refuse a citation this tool had written, so the two moved
+# together. This one is raised because the document apycite writes down changes
+# **identity**. Below 0.9.0 a bare `- label: RFC 9110` is written out as
+# `rfc9110.txt` with `type: text/plain`; at 0.9.0 it is written out as
+# `rfc9110.html` with no type at all, because an RFC is no longer a content format
+# apysource sniffs for but a repository that chooses which rendition answers.
+#
+# So the floor is not protecting a quote here, it is protecting a file. A project
+# pinning the older apysource against the newer apycite would generate sources
+# whose urls disagree with every other consumer of the same names, and
+# `extract --frozen` would report that disagreement as apycite's own drift, on a
+# commit that touched nothing near it.
+#
+# One consequence worth knowing: `--strict-repos` now covers RFCs, which it never
+# did. They used to reach the generic fetcher, where a repo has nothing to say.
 dependencies = [
-    "apysource>=0.8.1",
+    "apysource>=0.9.0",
     "pyyaml>=6.0",
 ]
 
