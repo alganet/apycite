@@ -323,6 +323,48 @@ def test_a_missing_config_is_refused(project):
     assert main(["-c", "nope.toml", "extract"]) == 2
 
 
+# ── verify's strictness flags reach apysource ───────────────────────────
+#
+# `verify` is a shell over `apysource.check_graph`, so what these assert is the
+# only thing apycite decides: that a flag typed on the command line arrives.
+# A strictness flag that parses and then goes nowhere is the silent pass this
+# whole tool exists to abolish, wearing the costume of a feature.
+
+def _verify_kwargs(project, argv, monkeypatch):
+    """Run `verify` over one real cite, with the network replaced by a recorder."""
+    import apysource
+    from apysource.results import CheckResult
+
+    _rule(project, "host_header", CITE)
+    seen = {}
+
+    def fake_check_graph(g, **kwargs):
+        seen.update(kwargs)
+        # A passing check, not an empty list: `verify` rightly exits 1 on a run
+        # that verified nothing, and that would mask what is being asserted.
+        return [CheckResult("Fragments", ok=1, total=1)]
+
+    monkeypatch.setattr(apysource, "check_graph", fake_check_graph)
+    assert main(argv) == 0
+    return seen
+
+
+def test_verify_defaults_to_reporting_rather_than_failing(project, monkeypatch):
+    """None of the three strictness flags is on unless it was asked for."""
+    seen = _verify_kwargs(project, ["verify"], monkeypatch)
+    assert seen["strict_redirects"] is False
+    assert seen["strict_repos"] is False
+    assert seen["strict_supersession"] is False
+
+
+def test_strict_supersession_reaches_apysource(project, monkeypatch):
+    seen = _verify_kwargs(
+        project, ["verify", "--strict-supersession"], monkeypatch)
+    assert seen["strict_supersession"] is True
+    # And it is the only one it turns on.
+    assert seen["strict_repos"] is False and seen["strict_redirects"] is False
+
+
 # ── extract --format ────────────────────────────────────────────────────
 
 def test_extract_format_turtle_writes_rdf(project):

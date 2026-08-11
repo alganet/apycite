@@ -191,6 +191,7 @@ apycite extract                   # scan the tree, write the citations file
 apycite extract --frozen          # ...or fail if the committed one is out of date
 apycite extract --format turtle   # ...as RDF instead of YAML
 apycite verify                    # check every quote against the source that says it
+apycite verify --strict-supersession   # ...and fail on a cite into a replaced document
 apycite ratchet                   # enforce the migration baseline
 apycite styles --path x.zig       # which comment style a file gets, and why
 ```
@@ -206,6 +207,14 @@ for every pull request; `verify` fetches, so it runs nightly:
 - run: apycite ratchet                 # no new rule without a citation
 - run: apysource check specs.yaml      # (or: apycite verify, nightly)
 ```
+
+`verify` is also where you find out that a document you cite has been **replaced**.
+That is a warning, not a failure, and the nightly job is the right place for it:
+the answer changes when a publisher moves, not when your tree does. It stays a
+warning because citing a superseded document is often the only cite available —
+a rule enforcing a header field the successor *deleted* has nowhere current to
+point. `--strict-supersession` turns it into a failure for a project that means
+to track only documents in force.
 
 ## Publishing the citations as RDF
 

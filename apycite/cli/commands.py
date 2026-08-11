@@ -106,13 +106,20 @@ def extract(config: Config, *, frozen: bool = False,
 
 
 def verify(config: Config, *, strict_redirects: bool = False,
-           strict_repos: bool = False, refresh: bool = False,
-           as_json: bool = False) -> int:
+           strict_repos: bool = False, strict_supersession: bool = False,
+           refresh: bool = False, as_json: bool = False) -> int:
     """Scan, then check every quote against the source that is supposed to say it.
 
     Deliberately not the default: fetching a few hundred specs on every push is
     antisocial. `extract --frozen` and `ratchet` are what a pull request runs;
-    this is what a nightly job runs.
+    this is what a nightly job runs — which is also where a superseded document
+    surfaces, and the right place for it: that answer changes when a publisher
+    moves, not when this tree does.
+
+    `strict_supersession` is off by design, and not merely by default. A cite
+    into a replaced document is often the only cite available — a rule that
+    enforces a header field the successor *deleted* has nowhere current to
+    point — so this reports and does not judge.
     """
     import json
 
@@ -142,7 +149,8 @@ def verify(config: Config, *, strict_redirects: bool = False,
 
     results = check_graph(graph_from_data(document, origin="(apycite)"),
                           force=refresh, strict_redirects=strict_redirects,
-                          strict_repos=strict_repos)
+                          strict_repos=strict_repos,
+                          strict_supersession=strict_supersession)
     assert not isinstance(results, tuple)
 
     if as_json:

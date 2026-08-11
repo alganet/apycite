@@ -18,6 +18,7 @@ USAGE = """Usage: apycite [-c apycite.toml] <command> [flags]
           [--format yaml|turtle]
   verify  [--refresh] [--format json]  check every quote against its source
           [--strict-redirects] [--strict-repos]
+          [--strict-supersession]
   ratchet [--init] [--write]           enforce the migration baseline
   styles  [--path FILE]                which comment style a file gets, and why
 
@@ -98,12 +99,14 @@ def main(argv: list[str] | None = None) -> int:
             refresh, args = _flag(args, "--refresh")
             redirects, args = _flag(args, "--strict-redirects")
             repos, args = _flag(args, "--strict-repos")
+            superseded, args = _flag(args, "--strict-supersession")
             fmt, args = _value(args, "--format")
             if fmt not in (None, "json"):
                 print(f"error: unknown --format {fmt!r} (only 'json')", file=sys.stderr)
                 return 2
             return commands.verify(config, refresh=refresh,
                                    strict_redirects=redirects, strict_repos=repos,
+                                   strict_supersession=superseded,
                                    as_json=fmt == "json")
 
         if name == "ratchet":
