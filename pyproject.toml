@@ -84,8 +84,13 @@ classifiers = [
 #
 # One consequence worth knowing: `--strict-repos` now covers RFCs, which it never
 # did. They used to reach the generic fetcher, where a repo has nothing to say.
+#
+# 0.10.0 is a plain one: `verify` forwards `--strict-supersession`, and
+# `check_graph` below that version does not take the argument. Passing it is a
+# TypeError out of the middle of a run rather than a flag that quietly does
+# nothing — which is the better failure, and still a floor.
 dependencies = [
-    "apysource>=0.9.0",
+    "apysource>=0.10.0",
     "pyyaml>=6.0",
 ]
 
